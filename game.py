@@ -1,3 +1,4 @@
+import time
 import itertools
 from copy import copy
 import numpy as np
@@ -14,6 +15,14 @@ translate = {
 one_x = np.array([1, 0])
 one_y = np.array([0, 1])
 
+knight_moves = [
+    np.array([1, 2]), np.array([ 1, -2]),
+    np.array([-1, 2]), np.array([-1, -2]),
+    np.array([2, 1]), np.array([ 2, -1]),
+    np.array([-2, 1]), np.array([-2, -1])
+]
+king_moves = itertools.permutations([1, -1, 0], 2)
+
 class Game:
 
     str_moves = {
@@ -25,6 +34,16 @@ class Game:
         "deg_135": lambda x: x - one_x + one_y,
         "deg_225": lambda x: x - one_x - one_y,
         "deg_315": lambda x: x + one_x - one_y
+    }
+    str_move_checks = {
+        "ver_plus": lambda x: x[0] <= 7,
+        "ver_min": lambda x: x[0] >= 0,
+        "hor_plus": lambda x: x[1] <= 7,
+        "hor_min": lambda x: x[1] >= 0,
+        "deg_45": lambda x: x[0] <= 7 and x[1] <= 7,
+        "deg_135": lambda x: x[0] >= 0 and x[1] <= 7,
+        "deg_225": lambda x: x[0] >= 0 and x[1] >= 0,
+        "deg_315": lambda x: x[0] <= 7 and x[1] >= 0
     }
 
     piece_checks = {
@@ -42,6 +61,7 @@ class Game:
 
 
     def __init__(self, fen=None, game=None):
+        self.timer = 0
         if not game is None:
             self.position, self.state = game
         else:
@@ -76,11 +96,15 @@ class Game:
     def copy(self):
         return copy(self.position), copy(self.state)
 
-    def col_check(self, other):
-        return other * self.state[0] > 0
+    def col_check(self, other, op=1):
+        return other * self.state[0] * op > 0
 
-    def move(self, start, end, promotion=None):
-        if end == start or end in np.array(self.possible_moves[start]):
+    def move(self, start, end, promotion=None, flag=False, same=False):
+        if same:
+            self.position[*start] = 0
+            self.state[0] *= -1
+            return True
+        elif flag or end in np.array(self.possible_moves[start]):
             if abs(self.position[start]) == 1:
                 if abs(start[0] - end[0]) == 2:
                     self.state[2] = (start[0] - self.state[0], start[1])
@@ -90,8 +114,8 @@ class Game:
                 else:
                     self.state[2] = "-"
 
-                if end[0] in [0, 7]:
-                    self.position[start] = promotion
+                #if end[0] in [0, 7]:
+                #    self.position[start] = promotion
             else:
                 self.state[2] = "-"
 
@@ -130,25 +154,28 @@ class Game:
             self.state[0] *= -1
             self.state[3] = (self.state[3] + 1) % 2
             self.state[4] += (self.state[0] + 1) // 2
-            if end != start:
-                self.update()
-            return self.position, self.state
+            return True
         print("Illegal move")
         return False
 
-    def check_check(self, king=None):
+    def check_check(self, king=None, s_dir=None):
+        if s_dir is None:
+            dir_check = lambda _: True
+        else:
+            dir_check = lambda x: x in s_dir
         checks = []
         if king is None:
             king = np.where(self.position == 6 * self.state[0])
             king = np.array(king[0][0], king[1][0])
         for key, item in self.str_moves.items():
             dr = key.split("_")[0]
-            out, end = self.str_move(king, item)
+            if not dir_check(dr):
+                continue
+            out, end = self.str_move(king, key)
             if end is None:
                 continue
 
             if abs(end) == 1 and len(out) == 1:
-                print(out)
                 if dr == "deg" and king[0] + end == out[0][0]:
                     checks.append(out)
             elif abs(end) in self.piece_checks[dr]:
@@ -156,6 +183,9 @@ class Game:
             elif abs(end) == 6:
                 if np.all(abs(king - out) <= 1):
                     checks.append(out)
+
+        if not dir_check("a"):
+            return checks
 
         knights = self.kn_move(king)
         for pos in knights:
@@ -166,13 +196,16 @@ class Game:
         return checks
 
     def generate_moves(self):
-        # Finds positions of all pieces of current colour
         rows, cols = np.where(self.col_check(self.position))
 
         move_count = 0
         moves = {}
+        king = np.where(self.position == 6 * self.state[0])
+        king = np.array(king[0][0], king[1][0])
+        check = self.check_check(king)
+
         for start in zip(rows, cols):
-            p_moves = self.find_moves(start)
+            p_moves = self.find_moves(start, check, king)
             moves[start] = p_moves
             move_count += len(p_moves)
 
@@ -182,19 +215,19 @@ class Game:
 
         return moves
 
-    def find_moves(self, start):
+    def find_moves(self, start, check, king):
         piece = abs(self.position[start])
         out = []
         check_flag = False
         no_flag = False
-
-        no_position = Game(game=self.copy())
-        no_position.move(start, start)
+        start = np.array(start)
 
         if piece == 6:
+            no_position = Game(game=self.copy())
+            no_position.move(start, start, same=True)
             no_position.state[0] *= -1
             pos = np.array(start)
-            for i in itertools.permutations([1, -1, 0], 2):
+            for i in king_moves:
                 i = np.array(i)
                 move = pos + i
                 if np.all(0 <= move) and np.all(move <= 7):
@@ -226,25 +259,37 @@ class Game:
 
             return out
 
-        check = self.check_check()
         if len(check) != 0:
             if len(check) > 1:
                 return []
             check = check[0]
             check_flag = True
-        no_check = no_position.check_check()
-        if len(no_check) == 1 and not check_flag or len(no_check) == 2:
-            no_flag = True
+
+        king_dif = np.array(start) - king
+        if 0 in king_dif or abs(king_dif[0]) == abs(king_dif[1]):
+            if king_dif[0] == 0:
+                s_dir = ["ver"]
+            elif king_dif[1] == 0:
+                s_dir = ["hor"]
+            else:
+                s_dir = ["deg"]
+
+            no_position = Game(game=self.copy())
+            no_position.move(start, start, same=True)
+            start_t = time.perf_counter()
+            no_check = no_position.check_check(s_dir=s_dir)
+            if len(no_check) == 1 and not check_flag or len(no_check) == 2:
+                no_flag = True
 
         if piece == 1:
             if self.state[0] == 1:
-                move = self.str_moves["ver_min"]
-                take_1 = self.str_moves["deg_45"]
-                take_2 = self.str_moves["deg_135"]
+                move = "ver_min"
+                take_1 = "deg_225"
+                take_2 = "deg_315"
             else:
-                move = self.str_moves["ver_plus"]
-                take_1 = self.str_moves["deg_225"]
-                take_2 = self.str_moves["deg_315"]
+                move = "ver_plus"
+                take_1 = "deg_45"
+                take_2 = "deg_135"
 
             hard = 1
             if start[0] == 6:
@@ -256,41 +301,44 @@ class Game:
             out += fw
 
             for take in [take_1, take_2]:
-                take, take_c = self.str_move(start, take_1, 1)
-                if take is None:
-                    if self.state[2] != take[0]:
-                        take = []
+                take, take_c = self.str_move(start, take, 1)
+                if len(take) == 0:
+                    continue
+                if take_c is None:
+                    if np.any(self.state[2] != take[0]):
+                        continue
                 out += take
         elif piece == 2:
             out = self.kn_move(start)
         elif piece in [3, 4, 5]:
             for name in self.piece_moves[piece]:
-                moves, take = self.str_move(start, self.str_moves[name])
+                moves, take = self.str_move(start, name)
                 out += moves
 
         if len(out) == 0:
             return []
 
         out = np.array(out)
-        if no_check:
-            for icheck in no_check:
+        if no_flag:
+            for check in no_check:
                 temp = (out[:, None] == check).all(-1).any(-1)
                 out = out[temp]
-        elif check_flag:
+        if check_flag:
             temp = (out[:, None] == check).all(-1).any(-1)
             out = out[temp]
 
         return out
 
-    def str_move(self, start, move, hard=8):
+    def str_move(self, pos, move, hard=8):
+        check = self.str_move_checks[move]
+        move = self.str_moves[move]
         out = []
-        pos = np.array(start)
         end = None
         counter = 0
 
         while counter < hard:
             pos = move(pos)
-            if not (np.all(0 <= pos) and np.all(pos <= 7)):
+            if not check(pos):
                 break
             counter += 1
             if self.col_check(self.position[*pos]):
@@ -302,14 +350,10 @@ class Game:
             out.append(pos)
         return out, end
 
-    def kn_move(self, start):
+    def kn_move(self, pos):
         out = []
-        pos = np.array(start)
 
-        for move in itertools.permutations([1, -1, 2, -2], 2):
-            if abs(move[0]) == abs(move[1]):
-                continue
-            move = np.array(move)
+        for move in knight_moves:
             move += pos
             if np.all(0 <= move) and np.all(move <= 7):
                 if self.col_check(self.position[*move]):

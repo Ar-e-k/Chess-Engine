@@ -9,11 +9,11 @@ def convert(pos):
 
 def play():
     game = Game()
-    game.update()
     flag = True
     while True:
         if flag:
             print(game.position)
+            game.update()
         move = input("Play: ").split(" ")
         flag = game.move(convert(move[0]), convert(move[1]))
 
