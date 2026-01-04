@@ -13,6 +13,7 @@ translate = {
 }
 
 fen_translate = {
+    0: "",
     1: "p",
     2: "n",
     3: "b",
@@ -146,7 +147,8 @@ class Game:
             self.position[*start] = 0
             self.state[0] *= -1
             return True
-        elif flag or end in np.array(self.possible_moves[start]):
+        elif flag or np.any(np.all(
+                end == np.array(self.possible_moves[start]), axis=1)):
             if abs(self.position[start]) == 1:
                 if abs(start[0] - end[0]) == 2:
                     self.state[2] = (start[0] - self.state[0], start[1])
@@ -208,7 +210,7 @@ class Game:
         checks = []
         if king is None:
             king = np.where(self.position == 6 * self.state[0])
-            king = np.array(king[0][0], king[1][0])
+            king = np.array((king[0][0], king[1][0]))
         for key, item in self.str_moves.items():
             dr = key.split("_")[0]
             if not dir_check(dr):
@@ -243,7 +245,7 @@ class Game:
         move_count = 0
         moves = {}
         king = np.where(self.position == 6 * self.state[0])
-        king = np.array(king[0][0], king[1][0])
+        king = np.array((king[0][0], king[1][0]))
         check = self.check_check(king)
 
         for start in zip(rows, cols):
@@ -334,7 +336,7 @@ class Game:
                 take_2 = "deg_135"
 
             hard = 1
-            if start[0] == 6:
+            if start[0] == 6 or start[0] == 1:
                 hard = 2
 
             fw, take = self.str_move(start, move, hard)
@@ -396,11 +398,11 @@ class Game:
         out = []
 
         for move in knight_moves:
-            move += pos
-            if np.all(0 <= move) and np.all(move <= 7):
-                if self.col_check(self.position[*move]):
+            new_pos = move + pos
+            if np.all(0 <= new_pos) and np.all(new_pos <= 7):
+                if self.col_check(self.position[*new_pos]):
                     continue
-                out.append(move)
+                out.append(new_pos)
 
         return out
 
