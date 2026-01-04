@@ -12,6 +12,15 @@ translate = {
     "k": 6
 }
 
+fen_translate = {
+    1: "p",
+    2: "n",
+    3: "b",
+    4: "r",
+    5: "q",
+    6: "k"
+}
+
 one_x = np.array([1, 0])
 one_y = np.array([0, 1])
 
@@ -89,6 +98,39 @@ class Game:
                     else:
                         self.position[i][pos] = translate[j.lower()] * (-1 + 2 * j.isupper())
                         pos += 1
+
+    def fen(self):
+        fen = ""
+        for row in self.position:
+            empty = 0
+            for i in row:
+                if i == 0:
+                    empty += 1
+                    continue
+                else:
+                    if empty != 0:
+                        fen += str(empty)
+                        empty = 0
+                let = fen_translate[abs(i)]
+                if i > 0:
+                    fen += let.upper()
+                else:
+                    fen +=let
+            if empty != 0:
+                fen += str(empty)
+            fen += "/"
+        fen += " "
+        if self.state[0] == 1:
+            fen += "w "
+        else:
+            fen += "b "
+        fen += self.state[1] + " "
+        if self.state[2] == "-":
+            fen += "-"
+        else:
+            fen +=  chr(self.state[2][0] + 97) + str(8 - self.state[2][1])
+        fen += " " + str(self.state[3]) + " " + str(self.state[4])
+        return fen
 
     def update(self):
         self.possible_moves = self.generate_moves()
