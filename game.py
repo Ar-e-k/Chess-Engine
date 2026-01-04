@@ -31,7 +31,8 @@ knight_moves = [
     np.array([2, 1]), np.array([ 2, -1]),
     np.array([-2, 1]), np.array([-2, -1])
 ]
-king_moves = itertools.permutations([1, -1, 0], 2)
+king_moves = [np.array(i) for i in
+              itertools.permutations([1, -1, 0], 2)]
 
 class Game:
 
@@ -41,9 +42,9 @@ class Game:
         "hor_plus": lambda x: x + one_y,
         "hor_min": lambda x: x - one_y,
         "deg_45": lambda x: x + one_x + one_y,
-        "deg_135": lambda x: x - one_x + one_y,
+        "deg_135": lambda x: x + one_x - one_y,
         "deg_225": lambda x: x - one_x - one_y,
-        "deg_315": lambda x: x + one_x - one_y
+        "deg_315": lambda x: x - one_x + one_y
     }
     str_move_checks = {
         "ver_plus": lambda x: x[0] <= 7,
@@ -51,9 +52,9 @@ class Game:
         "hor_plus": lambda x: x[1] <= 7,
         "hor_min": lambda x: x[1] >= 0,
         "deg_45": lambda x: x[0] <= 7 and x[1] <= 7,
-        "deg_135": lambda x: x[0] >= 0 and x[1] <= 7,
+        "deg_135": lambda x: x[0] <= 7 and x[1] >= 0,
         "deg_225": lambda x: x[0] >= 0 and x[1] >= 0,
-        "deg_315": lambda x: x[0] <= 7 and x[1] >= 0
+        "deg_315": lambda x: x[0] >= 0 and x[1] <= 7
     }
 
     piece_checks = {
@@ -120,6 +121,7 @@ class Game:
             if empty != 0:
                 fen += str(empty)
             fen += "/"
+        fen = fen[:-1]
         fen += " "
         if self.state[0] == 1:
             fen += "w "
@@ -145,7 +147,6 @@ class Game:
     def move(self, start, end, promotion=None, flag=False, same=False):
         if same:
             self.position[*start] = 0
-            self.state[0] *= -1
             return True
         elif flag or np.any(np.all(
                 end == np.array(self.possible_moves[start]), axis=1)):
@@ -179,10 +180,10 @@ class Game:
 
                 if end[1] - start[1] == 2:
                     self.position[0, 7] = 0
-                    self.position[0, 5] = 4
+                    self.position[0, 5] = -4
                 elif end[1] - start[1] == -2:
                     self.position[0, 0] = 0
-                    self.position[0, 3] = 4
+                    self.position[0, 3] = -4
             elif abs(self.position[start]) == 4:
                 if start == (0, 0):
                     self.state[1] = self.state[1].replace("q", "")
@@ -269,32 +270,32 @@ class Game:
         if piece == 6:
             no_position = Game(game=self.copy())
             no_position.move(start, start, same=True)
-            no_position.state[0] *= -1
             pos = np.array(start)
             for i in king_moves:
-                i = np.array(i)
                 move = pos + i
                 if np.all(0 <= move) and np.all(move <= 7):
                     if self.col_check(self.position[*move]):
                         continue
-                    check = len(no_position.check_check(move)) > 0
+                    check = len(no_position.check_check(king=move)) > 0
                     if not check:
                         out.append(move)
+                    else:
+                        continue
 
-                    if (np.all(i == [0, -1]) and
-                        (self.state[0] == 1 and "K" in self.state[1]) or
-                        (self.state[0] == -1 and "k" in self.state[1])):
-                        move = pos + i
-                        if self.col_check(self.position[*move]):
+                    if (np.all(i == [0, 1]) and
+                        ((self.state[0] == 1 and "K" in self.state[1]) or
+                        (self.state[0] == -1 and "k" in self.state[1]))):
+                        move = move + i
+                        if self.position[*move] != 0:
                             continue
                         check = len(no_position.check_check(move)) > 0
                         if not check:
                             out.append(move)
-                    elif (np.all(i == [0, 1]) and
-                        (self.state[0] == 1 and "K" in self.state[1]) or
-                        (self.state[0] == -1 and "k" in self.state[1])):
-                        move = pos + i
-                        if self.col_check(self.position[*move]):
+                    elif (np.all(i == [0, -1]) and
+                        (self.state[0] == 1 and "Q" in self.state[1]) or
+                        (self.state[0] == -1 and "q" in self.state[1])):
+                        move = move + i
+                        if self.position[*move] != 0:
                             continue
                         check = len(no_position.check_check(move)) > 0
                         thrd = move + i
@@ -320,8 +321,7 @@ class Game:
 
             no_position = Game(game=self.copy())
             no_position.move(start, start, same=True)
-            start_t = time.perf_counter()
-            no_check = no_position.check_check(s_dir=s_dir)
+            no_check = no_position.check_check(king=king, s_dir=s_dir)
             if len(no_check) == 1 and not check_flag or len(no_check) == 2:
                 no_flag = True
 

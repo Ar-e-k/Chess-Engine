@@ -54,11 +54,14 @@ class Play:
                 self.buttons[i][j].config(text=self.get_text((i, j)))
                 self.buttons[x][y].config(text="")
                 self.selected = None
+            else:
+                self.selected = None
         self.update()
 
     def update(self):
         for i, row in enumerate(self.buttons):
             for j, but in enumerate(row):
+                self.buttons[i][j].config(text=self.get_text((i, j)))
                 if (i + j) % 2 == 0:
                     col = "#EDE8D0"
                 else:
