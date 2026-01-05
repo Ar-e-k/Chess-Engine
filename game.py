@@ -142,9 +142,9 @@ class Game:
     def update(self):
         self.possible_moves = self.generate_moves()
 
-    def col_checks(self, other):
+    def col_checks(self, other, op=1):
         return [pos for pos, i in enumerate(other)
-                if 7 > i * self.state[0] > 0]
+                if 7 > i * self.state[0] * op > 0]
 
     def col_check(self, pos, op=1):
         return self.position[pos] * self.state[0] * op > 0
@@ -262,7 +262,7 @@ class Game:
                 continue
 
             if abs(end) == 1 and len(out) == 1:
-                if dr == "deg" and self.col_check(end):
+                if dr == "deg" and king * end < out[0] * end:
                     checks.append(out)
             elif abs(end) in self.piece_checks[dr]:
                 checks.append(out)
@@ -340,8 +340,8 @@ class Game:
                     if not check:
                         out.append(move)
                 elif (i == -1 and
-                    (self.state[0] == 1 and "Q" in self.state[1]) or
-                    (self.state[0] == -1 and "q" in self.state[1])):
+                    ((self.state[0] == 1 and "Q" in self.state[1]) or
+                    (self.state[0] == -1 and "q" in self.state[1]))):
                     move = move + i
                     if self.position[move] != 0:
                         continue

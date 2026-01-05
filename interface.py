@@ -1,7 +1,9 @@
+import time
 import tkinter as tk
 from tkinter import ttk
 
 from game import Game, fen_translate
+from engine import make_move
 
 class Play:
 
@@ -40,6 +42,18 @@ class Play:
 
         self.update()
 
+        self.ai = tk.Button(
+            frm, text="Bot Move",
+            command=lambda: self.eng_move(),
+            height=3, width=6
+        )
+        self.ai.grid(column=8, row=1)
+        self.ai_ev= tk.Button(
+            frm, text="-",
+            command=lambda: self.eng_evl(),
+            height=3, width=6
+        )
+        self.ai_ev.grid(column=8, row=2)
         self.undo = tk.Button(
             frm, text="Undo",
             command=lambda: self.undo_move(),
@@ -107,6 +121,9 @@ class Play:
     def convert(self, i, j):
         return (i + 2) * 10 + 1 + j
 
+    def revert(self, pos):
+        return pos // 10 - 2, pos % 10 - 1
+
     def get_text(self, pos):
         pos = self.convert(*pos)
         i = self.game.position[pos]
@@ -119,6 +136,32 @@ class Play:
         self.game.undo_move()
         self.game.update()
         self.update()
+
+    def eng_evl(self):
+        move = make_move(self.game, 2)[0]
+        self.ai_ev.config(
+            text=str(round(move[1] * self.game.state[0], 2)))
+        print(self.revert(move[2]), self.revert(move[3]))
+        self.game.update()
+        i, j = self.revert(move[2])
+        self.buttons[i][j].config(bg="#B5C7EB")
+        i, j = self.revert(move[3])
+        self.buttons[i][j].config(bg="#4682B4")
+
+    def eng_move(self):
+        start_t = time.perf_counter()
+        move = make_move(self.game, 2)[0]
+        print(f"Move time: {time.perf_counter() - start_t}")
+        self.game.update()
+        _ = self.game.move(move[2], move[3])
+        self.game.update()
+        self.update()
+        self.ai_ev.config(
+            text=str(round(move[1] * self.game.state[0], 2)))
+        i, j = self.revert(move[2])
+        self.buttons[i][j].config(bg="#B5C7EB")
+        i, j = self.revert(move[3])
+        self.buttons[i][j].config(bg="#4682B4")
 
 if __name__ == "__main__":
     Play()
