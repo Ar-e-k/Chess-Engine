@@ -24,12 +24,15 @@ def make_move(game, depth=2):
     for start, moves in all_moves.items():
         for move in moves:
             game.move(start, move, flag=True)
-            pos_moves.append([None, -search(game, depth), start, move])
+            pos_moves.append(
+                [None,
+                 -search(game, depth, np.inf),
+                 start, move])
             game.undo_move()
     pos_moves = sorted(pos_moves, key=lambda x: x[1], reverse=True)
     return pos_moves
 
-def search(game, depth):
+def search(game, depth, prev):
     if depth == 0:
         return score_position(game)
 
@@ -42,8 +45,10 @@ def search(game, depth):
         return np.inf
     for start, moves in all_moves.items():
         for move in moves:
+            if prev < best:
+                return prev
             game.move(start, move, flag=True)
-            score = -search(game, depth - 1)
+            score = -search(game, depth - 1, -best)
             game.undo_move()
             best = max(best, score)
 
@@ -63,8 +68,7 @@ def score_position(game):
     return score + random_fac
 
 def time_test():
-    game = Game()
-    cProfile.run('game = Game(); make_move(game, depth=3)')
+    cProfile.run('game = Game("r1b1k2r/ppppnppp/2n2q2/2b5/2BNP3/2P1B3/PP3PPP/RN1QK2R b KQkq - 2 7"); make_move(game, depth=2)')
 
 def long_test():
     game = Game()
