@@ -1,15 +1,15 @@
-from copy import deepcopy as dp
 import tkinter as tk
 from tkinter import ttk
-import numpy as np
 
 from game import Game, fen_translate
-from engine import make_move
 
 class Play:
 
-    def __init__(self):
-        self.game = Game()
+    def __init__(self, game=None):
+        if game is None:
+            self.game = Game()
+        else:
+            self.game = game
         self.game.update()
 
         root = tk.Tk()
@@ -39,6 +39,14 @@ class Play:
             self.buttons.append(row)
 
         self.update()
+
+        self.undo = tk.Button(
+            frm, text="Undo",
+            command=lambda: self.undo_move(),
+            height=3, width=6
+        )
+        self.undo.grid(column=8, row=3)
+
         input()
 
     def move(self, i, j):
@@ -47,7 +55,7 @@ class Play:
                 self.selected = (i, j)
                 self.buttons[i][j].config(bg="#008000")
         else:
-            flag = self.game.move(self.selected, (i, j))
+            flag = self.game.move(self.convert(*self.selected), self.convert(i, j))
             if flag:
                 self.game.update()
                 x, y = self.selected
@@ -72,14 +80,16 @@ class Play:
                     else:
                         col = "#005451"
                 elif not self.selected is None:
-                    if np.any(np.all((i, j) == np.array(
-                                self.game.possible_moves[self.selected]), axis=1)):
+                    if (self.convert(i, j) in
+                                self.game.possible_moves[
+                                    self.convert(*self.selected)]):
                         col = "#0BDA51"
                 self.buttons[i][j].config(bg=col)
 
         check = self.game.check_check()
         for ch in check:
-            i, j = ch[-1]
+            i = ch[-1] // 10 - 2
+            j = ch[-1] % 10 - 1
             self.buttons[i][j].config(bg="#CD1C18")
 
         if not self.selected is None:
@@ -88,51 +98,27 @@ class Play:
             self.buttons[i][j].config(bg=col)
 
     def check_pos(self, pos):
+        pos = self.convert(*pos)
         if pos in self.game.possible_moves:
             if len(self.game.possible_moves[pos]) != 0:
                 return True
         return False
 
+    def convert(self, i, j):
+        return (i + 2) * 10 + 1 + j
+
     def get_text(self, pos):
+        pos = self.convert(*pos)
         i = self.game.position[pos]
         text = fen_translate[abs(i)]
         if i > 0:
             text = text.upper()
         return text
 
-def convert(pos):
-    row = np.int64(ord(pos[0]) - 97)
-    col = 8 - np.int64(pos[1])
-    return col, row
-
-def play_old():
-    game = Game()
-    flag = True
-    while True:
-        if flag:
-            print(game.position)
-            game.update()
-        move = input("Play: ").split(" ")
-        flag = game.move(convert(move[0]), convert(move[1]))
-
-def play_bot():
-    game = Game()
-    flag = True
-    bot = False
-    while True:
-        if flag:
-            game.update()
-        if bot:
-            move = make_move(game)[0]
-            move = (move[2], tuple(move[3]))
-            bot = not(bot)
-        else:
-            print(game.position)
-            move = input("Play: ").split(" ")
-            move = (convert(move[0]), convert(move[1]))
-            bot = not(bot)
-
-        flag = game.move(*move)
+    def undo_move(self):
+        self.game.undo_move()
+        self.game.update()
+        self.update()
 
 if __name__ == "__main__":
     Play()
