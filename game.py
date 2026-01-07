@@ -254,13 +254,13 @@ class Game:
             c1, c2, idc = self.king_move(start, end)
 
             if self.position[start] in [4, -4]:
-                if start == 12:
+                if start == 21:
                     self.state[1] = self.state[1].replace("q", "")
-                elif start == 19:
+                elif start == 28:
                     self.state[1] = self.state[1].replace("k", "")
-                elif start == 82:
+                elif start == 91:
                     self.state[1] = self.state[1].replace("Q", "")
-                elif start == 99:
+                elif start == 98:
                     self.state[1] = self.state[1].replace("K", "")
 
             move_s = Undo(
@@ -387,7 +387,7 @@ class Game:
                 s_dir = ["ver_plus"]
             else:
                 s_dir = ["ver_min"]
-        elif king_dif // 10 == 0:
+        elif king_dif // 8 == 0:
             if king_dif > 0:
                 s_dir = ["hor_plus"]
             else:
@@ -409,7 +409,7 @@ class Game:
             no_check = self.check_check(king=king, s_dir=s_dir)
             if len(no_check) == 1 and not check_flag or len(no_check) == 2:
                 no_flag = True
-                dr = s_dir[:3]
+                dr = s_dir[0][:3]
             self.position[start] = piece * self.state[0]
 
         if piece == 1:
@@ -420,9 +420,9 @@ class Game:
             if no_flag:
                 if dr == "hor":
                     return []
-                if dr != ["ver"]:
-                    mv_fw = 0
-                if dr != ["deg"]:
+                if dr != "ver":
+                    mx_fw = 0
+                if dr != "deg":
                     tk = 0
 
             if self.state[0] == 1:
@@ -453,7 +453,7 @@ class Game:
             out = self.kn_move(start)
         elif piece in [3, 4, 5]:
             for name in self.piece_moves[piece]:
-                if no_flag and name[:3] != dr:
+                if no_flag and name[:3] != dr[:3]:
                     continue
                 moves, take = self.str_move(start, name)
                 out += moves
@@ -508,6 +508,5 @@ class Game:
 
 game = Game()
 start_t = time.perf_counter()
-#game.update()
+game.update()
 print(f"Update: {time.perf_counter() - start_t}")
-game = Game("r1b1k2r/ppppnppp/2n2q2/2b5/2BNP3/2P1B3/PP3PPP/RN1QK2R b KQkq - 2 7")
