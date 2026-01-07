@@ -100,7 +100,7 @@ class Play:
                         col = "#0BDA51"
                 self.buttons[i][j].config(bg=col)
 
-        check = self.game.check_check()
+        check = self.game.check_check(self.game.position.index(6 * self.game.state[0]))
         for ch in check:
             i = ch[-1] // 10 - 2
             j = ch[-1] % 10 - 1
@@ -138,7 +138,7 @@ class Play:
         self.update()
 
     def eng_evl(self):
-        move = make_move(self.game, 2)[0]
+        move = make_move(self.game, -1)[0]
         self.ai_ev.config(
             text=str(round(move[1] * self.game.state[0], 2)))
         print(self.revert(move[2]), self.revert(move[3]))

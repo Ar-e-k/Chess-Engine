@@ -1,6 +1,5 @@
 import random
 import time
-import numpy as np
 
 import cProfile
 
@@ -14,10 +13,18 @@ point_conv = {
     3: 3,
     4: 5,
     5: 9,
-    6: 0
+    6: 0,
+    -1:1,
+    -2:3,
+    -3:3,
+    -4:5,
+    -5:9,
+    -6:0
 }
 
 def make_move(game, depth=2):
+    if depth == -1:
+        return [[0, score_position(game), 0, 0]]
     game.update()
     pos_moves = []
     all_moves = game.possible_moves
@@ -26,7 +33,7 @@ def make_move(game, depth=2):
             game.move(start, move, flag=True)
             pos_moves.append(
                 [None,
-                 -search(game, depth, np.inf),
+                 -search(game, depth, 1000),
                  start, move])
             game.undo_move()
     pos_moves = sorted(pos_moves, key=lambda x: x[1], reverse=True)
@@ -36,13 +43,14 @@ def search(game, depth, prev):
     if depth == 0:
         return score_position(game)
 
-    best = -np.inf
+    best = -1000
     game.update()
     all_moves = game.possible_moves
     if len(all_moves) == 0:
         if len(game.check_check()) == 0:
             return 0
-        return np.inf
+        return 1000
+
     for start, moves in all_moves.items():
         for move in moves:
             if prev < best:
@@ -55,20 +63,32 @@ def search(game, depth, prev):
     return best
 
 def score_position(game):
-    own_pieces = game.col_checks(game.position)
-    op_pieces = game.col_checks(game.position, op=-1)
+    own_pieces = game.col_checks()
+    op_pieces = game.col_checks(op=-1)
     score = 0
     for i in own_pieces:
-        score += point_conv[abs(game.position[i])]
+        if i == 0:
+            continue
+        score += point_conv[game.position[i]]
     for i in op_pieces:
-        score -= point_conv[abs(game.position[i])]
+        if i == 0:
+            continue
+        try:
+            score -= point_conv[game.position[i]]
+        except:
+            print(game.moves_made)
+            print(i)
+            print(game.fen())
+            print(sorted(op_pieces))
+            print([pos for pos, i in enumerate(game.position) if 0 < i < 7])
+            raise KeyboardInterrupt
 
     random_fac = random.random() / 10 ** 2
 
     return score + random_fac
 
 def time_test():
-    cProfile.run('game = Game("r1b1k2r/ppppnppp/2n2q2/2b5/2BNP3/2P1B3/PP3PPP/RN1QK2R b KQkq - 2 7"); make_move(game, depth=2)')
+    cProfile.run('game = Game("r1b1k2r/ppppnppp/2n2q2/2b5/2BNP3/2P1B3/PP3PPP/RN1QK2R b KQkq - 2 7"); make_move(game, depth=3)')
 
 def long_test():
     game = Game()
@@ -83,12 +103,12 @@ def long_test():
         input(f"Move-end: {time.perf_counter() - start_t}")
 
 def main():
-    return None
     game = Game()
     start = time.perf_counter()
     move = make_move(game)
     print(f"Time: {time.perf_counter()- start}")
 
 if __name__ == "__main__":
+    #main()
     #long_test()
     time_test()
