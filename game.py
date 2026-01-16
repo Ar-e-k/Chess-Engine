@@ -162,6 +162,9 @@ class Game:
     def update(self):
         self.possible_moves = self.generate_moves()
 
+    def possible_moves_out(self):
+        return self.possible_moves
+
     def col_checks(self, op=1):
         return self.pieces[(self.state[0] * op - 1) // -2][:-1]
 
@@ -190,7 +193,7 @@ class Game:
         self.state[1] = move.csl
         self.state[2] = move.eps
 
-    def pone_move(self, start, end, promotion):
+    def pone_moved(self, start, end, promotion):
         if self.position[start] in [1, -1]:
             if abs(start - end) == 20:
                 self.state[2] = start - self.state[0] * 10
@@ -239,10 +242,12 @@ class Game:
 
     def move(self, start, end, promotion=None, flag=False):
         if flag or end in self.possible_moves[start]:
+            end = end[0]
             cs, es = self.state[1:3]
             id2 = -1
             p_index = (self.state[0] - 1) // -2
             id1 = self.pieces[p_index].index(start)
+            old1 = self.position[start]
 
             self.pieces[p_index][id1] = end
             if self.position[end] != 0:
@@ -250,7 +255,7 @@ class Game:
                 id2 = self.pieces[o_index].index(end)
                 self.pieces[o_index][id2] = 0
 
-            ep, ide = self.pone_move(start, end, promotion)
+            ep, ide = self.pone_moved(start, end, promotion)
             c1, c2, idc = self.king_move(start, end)
 
             if self.position[start] in [4, -4]:
@@ -264,7 +269,7 @@ class Game:
                     self.state[1] = self.state[1].replace("K", "")
 
             move_s = Undo(
-                sqr1=start, old1=self.position[start], id1=id1,
+                sqr1=start, old1=old1, id1=id1,
                 sqr2=end, old2=self.position[end], id2=id2,
                 sqr3=c1, sqr4=c2, idc=idc,
                 csl=cs,
@@ -278,10 +283,13 @@ class Game:
             self.state[3] = (self.state[3] + 1) % 2
             self.state[4] += (self.state[0] + 1) // 2
             return True
-        print(f"Illegal move: {start, end}")
         return False
 
-    def check_check(self, king=None, s_dir=None):
+    def check_out(self):
+        king = self.position.index(6 * self.state[0])
+        return self.check_check(king)
+
+    def check_check(self, king, s_dir=None):
         checks = []
         dirs = s_dir or self.str_dirs
         for key in dirs:
@@ -290,21 +298,21 @@ class Game:
                 continue
 
             if abs(end) == 1 and len(out) == 1:
-                if key[:3] == "deg" and king * end < out[0] * end:
-                    checks.append(out)
+                if key[:3] == "deg" and king * end < out[0][0] * end:
+                    checks.append([out[0][0]])
             elif abs(end) in self.piece_checks[key[:3]]:
-                checks.append(out)
+                checks.append([i[0] for i in out])
             elif abs(end) == 6 and len(out) == 1:
-                checks.append(out)
+                checks.append([out[0][0]])
 
         if not s_dir is None:
             return checks
 
         knights = self.kn_move(king)
         for pos in knights:
-            fig = self.position[pos]
+            fig = self.position[pos[0]]
             if fig * self.state[0] == -2:
-                checks.append([pos])
+                checks.append([pos[0]])
 
         return checks
 
@@ -332,10 +340,11 @@ class Game:
                 continue
             p_moves = self.find_moves(
                 start, check, king, check_flag, piece)
-            moves[start] = p_moves
+            if len(p_moves) != 0:
+                moves[start] = p_moves
 
         if len(moves) == 0:
-            return False
+            return {}
 
         return moves
 
@@ -349,9 +358,9 @@ class Game:
                 move = start + i
                 if self.col_check(move) or self.bound_check(move):
                     continue
-                check = len(self.check_check(king=move)) > 0
+                check = len(self.check_check(move)) > 0
                 if not check:
-                    out.append(move)
+                    out.append((move, self.position[move] == 0))
                 else:
                     continue
 
@@ -366,7 +375,7 @@ class Game:
                         continue
                     check = len(self.check_check(move)) > 0
                     if not check:
-                        out.append(move)
+                        out.append((move, True))
                 elif (i == -1 and
                     ((self.state[0] == 1 and "Q" in self.state[1]) or
                     (self.state[0] == -1 and "q" in self.state[1]))):
@@ -376,7 +385,7 @@ class Game:
                     check = len(self.check_check(move)) > 0
                     thrd = move + i
                     if not check and self.position[thrd] == 0:
-                        out.append(move)
+                        out.append((move, True))
 
             self.position[start] = 6 * self.state[0]
             return out
@@ -387,7 +396,7 @@ class Game:
                 s_dir = ["ver_plus"]
             else:
                 s_dir = ["ver_min"]
-        elif king_dif // 8 == 0:
+        elif king_dif // 8 in [0, -1]:
             if king_dif > 0:
                 s_dir = ["hor_plus"]
             else:
@@ -406,15 +415,25 @@ class Game:
             s_dir = []
         if len(s_dir) != 0:
             self.position[start] = 0
-            no_check = self.check_check(king=king, s_dir=s_dir)
-            if len(no_check) == 1 and not check_flag or len(no_check) == 2:
+            no_check = self.check_check(king, s_dir=s_dir)
+            if len(no_check) != 0:
                 no_flag = True
                 dr = s_dir[0][:3]
             self.position[start] = piece * self.state[0]
 
         if piece == 1:
+            if no_flag:
+                if dr == "hor":
+                    return []
+                elif dr == "ver":
+                    out = self.pone_move(start)
+                elif dr == "deg":
+                    out = self.pone_take(start, s_dir[0])
+            else:
+                out = self.pone_move(start) + self.pone_take(start)
+        elif piece == 1:
             mx_fw = 1
-            tk = 1
+            mx_tk = [1, 1]
             if start // 10 == 8 or start // 10 == 3:
                 mx_fw = 2
             if no_flag:
@@ -423,24 +442,29 @@ class Game:
                 if dr != "ver":
                     mx_fw = 0
                 if dr != "deg":
-                    tk = 0
+                    mx_tk = [0, 0]
 
             if self.state[0] == 1:
                 move = "ver_min"
-                take_1 = "deg_225"
-                take_2 = "deg_315"
+                takes = ["deg_225", "deg_315"]
             else:
                 move = "ver_plus"
-                take_1 = "deg_45"
-                take_2 = "deg_135"
+                takes = ["deg_45", "deg_135"]
+            if no_flag:
+                if dr == "deg":
+                    if takes[:1] == s_dir:
+                        mx_tk = [1, 0]
+                    elif takes[1:] == s_dir:
+                        mx_tk = [0, 1]
 
             fw, take = self.str_move(start, move, mx_fw)
             if not take is None:
                 fw.pop()
             out += fw
 
-            for take in [take_1, take_2]:
-                take, take_c = self.str_move(start, take, tk)
+            for i in [0, 1]:
+                take = takes[i]
+                take, take_c = self.str_move(start, take, mx_tk[i])
                 if len(take) == 0:
                     continue
                 if take_c is None:
@@ -453,8 +477,12 @@ class Game:
             out = self.kn_move(start)
         elif piece in [3, 4, 5]:
             for name in self.piece_moves[piece]:
-                if no_flag and name[:3] != dr[:3]:
-                    continue
+                if no_flag:
+                    if name[:3] != dr:
+                        continue
+                    if dr == "deg":
+                        if int(name[4]) % 2 != int(s_dir[0][4]) % 2:
+                            continue
                 moves, take = self.str_move(start, name)
                 out += moves
 
@@ -471,10 +499,39 @@ class Game:
         if check_flag:
             out_check = []
             for i in out:
-                if i in check:
+                if i[0] in check:
                     out_check.append(i)
             return out_check
 
+        return out
+
+    def pone_move(self, start):
+        one = start - self.state[0] * 10
+        if self.position[one] == 0:
+            if start // 10 == 8 or start // 10 == 3:
+                two = one - self.state[0] * 10
+                if self.position[two] == 0:
+                    return [(one, True), (two, True)]
+                else:
+                    return [(one, True)]
+            else:
+                return [(one, True)]
+        return []
+
+    def pone_take(self, start, dr=None):
+        out = []
+        if start % 10 != 8 and (dr is None or int(dr[4]) % 2 == 0):
+            right = start - self.state[0] * 11
+            if not self.col_check(right) and self.position[right] != 0:
+                out.append((right, False))
+            elif right == self.state[2]:
+                out.append((right, False))
+        if start % 10 != 1 and (dr is None or int(dr[4]) % 2 == 1):
+            left = start - self.state[0] * 9
+            if not self.col_check(left) and self.position[left] != 0:
+                out.append((left, False))
+            elif left == self.state[2]:
+                out.append((left, False))
         return out
 
     def str_move(self, pos, move, hard=8):
@@ -490,9 +547,9 @@ class Game:
                 break
             elif self.position[pos] != 0:
                 end = self.position[pos]
-                out.append(pos)
+                out.append((pos, False))
                 break
-            out.append(pos)
+            out.append((pos, True))
         return out, end
 
     def kn_move(self, pos):
@@ -502,7 +559,7 @@ class Game:
             new_pos = move + pos
             if self.bound_check(new_pos) or self.col_check(new_pos):
                 continue
-            out.append(new_pos)
+            out.append((new_pos, self.position[new_pos] == 0))
 
         return out
 
@@ -510,3 +567,9 @@ game = Game()
 start_t = time.perf_counter()
 game.update()
 print(f"Update: {time.perf_counter() - start_t}")
+
+def update_loads(num, game):
+    for _ in range(num):
+        game.update()
+
+#cProfile.run('game = Game("r1b1k2r/ppppnppp/2n2q2/2b5/2BNP3/2P1B3/PP3PPP/RN1QK2R b KQkq - 2 7"); update_loads(10 ** 4, game)')
