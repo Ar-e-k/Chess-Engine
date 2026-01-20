@@ -45,6 +45,7 @@ class Play:
             self.buttons.append(row)
 
         self.update()
+        self.evl = None
 
         self.ai = tk.Button(
             frm, text="Bot Move",
@@ -52,12 +53,30 @@ class Play:
             height=3, width=6
         )
         self.ai.grid(column=8, row=1)
-        self.ai_ev= tk.Button(
+        self.ai_ev = tk.Button(
             frm, text="-",
-            command=lambda: self.eng_evl(),
+            command=lambda: self.eng_evl_dis(),
             height=3, width=6
         )
-        self.ai_ev.grid(column=8, row=2)
+        self.ai_ev.grid(column=9, row=1)
+        self.ai_piece = tk.Button(
+            frm, text="P-Eval",
+            command=lambda: self.eng_evl_piece(),
+            height=3, width=6
+        )
+        self.ai_piece.grid(column=9, row=3)
+        self.ai_all = tk.Button(
+            frm, text="B-Eval",
+            command=lambda: self.eng_evl_all(),
+            height=3, width=6
+        )
+        self.ai_all.grid(column=8, row=2)
+        self.ai_worst = tk.Button(
+            frm, text="W-Eval",
+            command=lambda: self.eng_evl_all(False),
+            height=3, width=6
+        )
+        self.ai_worst.grid(column=9, row=2)
         self.undo = tk.Button(
             frm, text="Undo",
             command=lambda: self.undo_move(),
@@ -94,6 +113,12 @@ class Play:
             height=3, width=6
         )
         self.ray.grid(column=8, row=6)
+        self.fen = tk.Button(
+            frm, text="Fen",
+            command=lambda: print(self.game.fen()),
+            height=3, width=6
+        )
+        self.fen.grid(column=9, row=6)
 
         input()
 
@@ -106,6 +131,7 @@ class Play:
             flag = self.game.move(self.convert(*self.selected), (self.convert(i, j), True))
             flag = flag or self.game.move(self.convert(*self.selected), (self.convert(i, j), False))
             if flag:
+                self.evl = None
                 self.game.update()
                 x, y = self.selected
                 self.buttons[i][j].config(text=self.get_text((i, j)))
@@ -174,6 +200,7 @@ class Play:
         return text
 
     def undo_move(self):
+        self.evl = None
         move = self.game.moves_made[-1]
         self.game.undo_move()
         self.game.update()
@@ -202,23 +229,52 @@ class Play:
 
     def eng_evl(self):
         self.update()
-        move = make_move(self.game, 0)[0]
+        if self.evl is None:
+            start_t = time.perf_counter()
+            moves = make_move(self.game, 1)
+            print(f"Move time: {time.perf_counter() - start_t}")
+            self.evl = moves
+        else:
+            moves = self.evl
         self.ai_ev.config(
-            text=str(round(move[1] * self.game.state[0] / 10 ** 3, 2)))
-        print(self.revert(move[2]), self.revert(move[3][0]))
+            text=str(round(moves[0][1] * self.game.state[0], 2)))
         self.game.update()
+        return moves
+
+    def eng_evl_all(self, best=True):
+        moves = self.eng_evl()
+        used = []
+        for move in moves:
+            i, j = self.revert(move[2])
+            if (i, j) in used:
+                continue
+            if best:
+                used.append((i, j))
+            self.buttons[i][j].config(
+                text=self.get_text((i, j)) + "\n" + str(round(move[1] * self.game.state[0], 2)))
+
+    def eng_evl_piece(self):
+        if self.selected is None:
+            return None
+        moves = self.eng_evl()
+        for move in moves:
+            i, j = self.revert(move[2])
+            if (i, j) == self.selected:
+                i, j = self.revert(move[3][0])
+                self.buttons[i][j].config(bg="#50C878")
+                self.buttons[i][j].config(
+                    text=str(round(move[1] * self.game.state[0], 2)))
+
+    def eng_evl_dis(self):
+        move = self.eng_evl()[0]
+        print(self.revert(move[2]), self.revert(move[3][0]))
         i, j = self.revert(move[2])
         self.buttons[i][j].config(bg="#B5C7EB")
         i, j = self.revert(move[3][0])
         self.buttons[i][j].config(bg="#4682B4")
 
     def eng_move(self):
-        start_t = time.perf_counter()
-        move = make_move(self.game, 0)[0]
-        print(f"Move time: {time.perf_counter() - start_t}")
-        self.ai_ev.config(
-            text=str(round(move[1] * self.game.state[0] / 10 ** 3, 2)))
-        self.game.update()
+        move = self.eng_evl()[0]
         _ = self.game.move(move[2], move[3])
         self.game.update()
         self.update()
@@ -226,6 +282,7 @@ class Play:
         self.buttons[i][j].config(bg="#B5C7EB")
         i, j = self.revert(move[3][0])
         self.buttons[i][j].config(bg="#4682B4")
+        self.evl = None
 
 if __name__ == "__main__":
     from engine import make_move

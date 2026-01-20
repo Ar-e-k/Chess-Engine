@@ -1,14 +1,13 @@
 import random
+from collections import defaultdict
 import time
 
 import cProfile
 
 from gamenew import Game
-from heatmaps import piece_heatmap
+from interface import Play
 
-random.seed(42)
-
-inf = 10 ** 6
+inf = 10 ** 3
 
 point_conv = {
     1: 1,
@@ -69,15 +68,15 @@ def make_move(game, depth=2):
 def search(game, depth, alpha, beta):
     if depth == 0:
         return q_search(game, alpha, beta)
-    #return score_position(game)
+        #return score_position(game)
 
     best = -inf
     game.update()
     all_moves = game.possible_moves_out()
     if len(all_moves) == 0:
-        if len(game.check_check(game.position.index(6 * game.state[0]))) == 0:
+        if len(game.check_out()) == 0:
             return 0
-        return inf
+        return -inf
 
     for start, moves in all_moves.items():
         for move in moves:
@@ -92,18 +91,14 @@ def search(game, depth, alpha, beta):
     return best
 
 def q_search(game, alpha, beta):
-    try:
-        game.update()
-    except:
-        from interface import Play
-        print(game.moves_made[-1].sqr1, game.moves_made[-1].sqr2)
-        game.undo_move()
-        Play(game)
-    all_moves = game.possible_moves_out()
+    game.update_captures()
+    all_moves = game.captures_out()
     if len(all_moves) == 0:
-        if game.check_out()[1] == 0:
-            return 0
-        return inf
+        game.update()
+        if len(game.possible_moves_out()) == 0:
+            if game.check_out()[1] == 0:
+                return 0
+            return -inf
     initial = score_position(game)
     best = initial
 
@@ -111,19 +106,15 @@ def q_search(game, alpha, beta):
 
     for start, moves in all_moves.items():
         for move in moves:
-            if move[1]:
-                continue
-            move_val = capture_conv[game.position[move[0]]
-                                    ] * 6 - capture_conv[game.position[start]]
+            move_val = capture_conv[
+                game.position[move]] * 6 - capture_conv[game.position[start]]
             captures.append((start, move, move_val))
     captures = sorted(captures, key=lambda x: x[2], reverse=True)
 
     for start, move, _ in captures:
         if alpha >= beta:
             return best
-        #if initial + point_conv[game.position[move[0]]] - point_conv[game.position[start]] < best - 0.1:
-        #    continue
-        game.move(start, move, flag=True)
+        game.move(start, (move, None), flag=True)
         score = -q_search(game, -beta, -alpha)
         game.undo_move()
         best = max(best, score)
@@ -136,10 +127,7 @@ def score_position(game):
     op_pieces = game.col_checks(op=-1)
     score = score_side(own_pieces, game) - score_side(op_pieces, game)
 
-    random_fac = (random.random() - 0.5) * 10
-    #random_fac = 0
-
-    return int(1000 * score + random_fac)
+    return score
 
 def score_side(pieces, game):
     score = 0
@@ -151,14 +139,20 @@ def score_side(pieces, game):
 
 def score_piece(game, pos):
     piece = game.position[pos]
-    return point_conv[piece]# * piece_heatmap[piece][pos]
+    return point_conv[piece]
 
 def time_test():
-    cProfile.run('game = Game("r1b1k2r/ppppnppp/2n2q2/2b5/2BNP3/2P1B3/PP3PPP/RN1QK2R b KQkq - 2 7"); print(make_move(game, depth=0))')
+    cProfile.run('game = Game("r1b1k2r/ppppnppp/2n2q2/2b5/2BNP3/2P1B3/PP3PPP/RN1QK2R b KQkq - 2 7"); make_move(game, depth=1); print(game.timer)')
 
 def debug_test():
     game = Game("r1b1k2r/ppppnppp/2n2q2/2b5/2BNP3/2P1B3/PP3PPP/RN1QK2R b KQkq - 2 7")
-    make_move(game, depth=0)
+    make_move(game, depth=2)
+
+def testing():
+    game = Game(fen="r1b1k2r/pBppnppp/5q2/8/4P3/2P1b3/PP3PPP/RN1QK2R w KQk - 1 11")
+    game = Game(fen="B1b1k2r/p1ppnppp/5q2/8/4P3/2P1b3/PP3PPP/RN1QK2R b KQk - 0 11")
+    score = -search(game, 1, -inf, 0)
+    print(score * game.state[0])
 
 def main():
     game = Game()
@@ -170,3 +164,4 @@ if __name__ == "__main__":
     #main()
     time_test()
     #debug_test()
+    #testing()

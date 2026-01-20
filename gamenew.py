@@ -6,6 +6,10 @@ from dataclasses import dataclass
 import timeit
 import cProfile
 
+pos_list = [(num // 10 - 2) * 8 + num % 10 - 1 for num in range(120)]
+rev_list = [(num // 8 + 2) * 10 + num % 8 + 1 for num in range(64)]
+one_list = [0, 0, 1]
+
 translate = {
     "p": 1,
     "n": 2,
@@ -131,10 +135,10 @@ class Game:
         ]
         white = 0
         for i in self.pieces[0][:-1]:
-            white |= 1 << self.pos_convert(i)
+            white |= 1 << pos_list[i]
         black = 0
         for i in self.pieces[1][:-1]:
-            black |= 1 << self.pos_convert(i)
+            black |= 1 << pos_list[i]
         self.piece_bitmap = [white, black]
 
         self.bitboards = [0] * 121
@@ -191,31 +195,40 @@ class Game:
             else:
                 self.bitboards[pos] = self.find_moves(pos, abs(start))
 
-    def pos_convert(self, num):
-        return (num // 10 - 2) * 8 + num % 10 - 1
-
-    def rev_convert(self, num):
-        return (num // 8 + 2) * 10 + num % 8 + 1
-
-    def one_convert(self, num):
-        return (num - 1) // -2
-
     def zero_convert(self, num):
         return -(2 * num) + 1
 
     def update(self):
         self.possible_moves = self.generate_moves()
 
+    def update_captures(self):
+        self.possible_captures = self.generate_captures()
+
     def possible_moves_out(self):
         out = {}
         for start, move in self.possible_moves.items():
             row = []
-            for pos, i in enumerate(f"{move:64b}"[::-1]):
-                if i == "1":
-                    row.append((
-                        self.rev_convert(pos),
-                        1 << pos & self.piece_bitmap[
-                            self.one_convert(-self.state[0])] == 0))
+            while move:
+                lsb = move & -move
+                pos = lsb.bit_length() - 1
+                row.append((rev_list[pos],
+                            1 << pos & self.piece_bitmap[
+                                one_list[-self.state[0]]] == 0))
+                move ^= lsb
+            if row == []:
+                continue
+            out[start] = row
+        return out
+
+    def captures_out(self):
+        out = {}
+        for start, move in self.possible_captures.items():
+            row = []
+            while move:
+                lsb = move & -move
+                pos = lsb.bit_length() - 1
+                row.append(rev_list[pos])
+                move ^= lsb
             if row == []:
                 continue
             out[start] = row
@@ -227,9 +240,9 @@ class Game:
         king = self.position.index(6 * self.state[0])
         checks = self.check_check(king, attacks)[0]
 
-        for pos, check in enumerate(f'{checks & self.piece_bitmap[self.one_convert(-self.state[0])]:064b}'[::-1]):
+        for pos, check in enumerate(f'{checks & self.piece_bitmap[one_list[-self.state[0]]]:064b}'[::-1]):
             if check == "1":
-                out.append(self.rev_convert(pos))
+                out.append(rev_list[pos])
         return out
 
     def col_checks(self, op=1):
@@ -237,9 +250,6 @@ class Game:
 
     def col_check(self, pos, op=1):
         return self.position[pos] * self.state[0] * op > 0
-
-    def bound_check(self, pos):
-        return self.position[pos] == 10
 
     def undo_move(self):
         move = self.moves_made.pop()
@@ -284,7 +294,7 @@ class Game:
         for pos, delta in deltas_new.items():
             bit_change.setdefault(pos, self.bitboards[pos])
             self.bitboards[pos] ^= delta
-            self.bitboards[pos] |= 1 << self.pos_convert(end)
+            self.bitboards[pos] |= 1 << pos_list[end]
 
         self.position[start] = piece
         return bit_change
@@ -302,14 +312,14 @@ class Game:
 
                 piece = self.position[start]
                 self.position[start] = 0
-                taken = 1 << self.pos_convert(self.state[2])
+                taken = 1 << pos_list[self.state[2]]
                 deltas_old = self.check_rays(self.state[2])
                 for pos, delta in deltas_old.items():
                     bit_change[pos] = self.bitboards[pos]
                     self.bitboards[pos] |= delta
                 self.position[start] = piece
 
-                deltao = 1 << self.pos_convert(ep)
+                deltao = 1 << pos_list[ep]
                 self.state[2] = "-"
                 return ep, ide, bit_change, deltao
             else:
@@ -330,12 +340,12 @@ class Game:
 
             if end - start == 2:
                 rays = ["hor_min", "ver_min"]
-                bit_change[98] = self.bitboards[98]
+                #bit_change[98] = self.bitboards[98]
                 idc, dlc = self.castle(98, 96, 0, 1, rays)
                 return 98, 96, idc, bit_change, deltac | dlc
             elif end - start == -2:
                 rays = ["hor_plus", "ver_min"]
-                bit_change[91] = self.bitboards[91]
+                #bit_change[91] = self.bitboards[91]
                 idc, dlc = self.castle(91, 94, 0, 1, rays)
                 return 91, 94, idc, bit_change, deltac | dlc
         elif self.position[start] == -6:
@@ -359,7 +369,7 @@ class Game:
         self.position[end] = side * 4
         idc = self.pieces[p_index].index(start)
         self.pieces[p_index][idc] = end
-        deltac = 1 << self.pos_convert(start) | 1 << self.pos_convert(end)
+        deltac = 1 << pos_list[start] | 1 << pos_list[end]
         moves = 0
         for ray in rays:
             moves |= self.str_move(end, ray)[0]
@@ -372,20 +382,20 @@ class Game:
             delta = {end: self.bitboards[end]}
             cs, es = self.state[1:3]
             id2 = -1
-            p_index = self.one_convert(self.state[0])
+            p_index = one_list[self.state[0]]
             o_index = (p_index + 1) % 2
             id1 = self.pieces[p_index].index(start)
             old1 = self.position[start]
             old2 = self.position[end]
 
-            deltac = 1 << self.pos_convert(start) | 1 << self.pos_convert(end)
+            deltac = 1 << pos_list[start] | 1 << pos_list[end]
             deltao = 0
 
             self.pieces[p_index][id1] = end
             if self.position[end] != 0:
                 id2 = self.pieces[o_index].index(end)
                 self.pieces[o_index][id2] = 0
-                deltao = 1 << self.pos_convert(end)
+                deltao = 1 << pos_list[end]
 
             ep, ide, delta, deltao = self.pone_moved(start, end, promotion, delta, deltao)
             delta = self.update_bitboards(start, end, delta, old2!=0)
@@ -441,42 +451,11 @@ class Game:
             piece = abs(self.position[end])
 
             if piece in self.piece_checks[key]:
-                deltas[end] |= rays[i + self.zero_convert(i % 2)][0] | 1 << self.pos_convert(start)
+                deltas[end] |= rays[i + self.zero_convert(i % 2)][0] | 1 << pos_list[start]
             elif piece == 6 and out.bit_count() == 1:
-                deltas[end] |= 1 << self.pos_convert(start)
+                deltas[end] |= 1 << pos_list[start]
 
         return deltas
-
-    def check_check_old(self, king, attacks):
-        if attacks & (1 << self.pos_convert(king)) == 0:
-            return 0, 0, attacks
-
-        checks = 0
-        out = 0
-        bitmap = self.piece_bitmap[self.one_convert(-self.state[0])]
-        for i in [1, 2, 3, 4]:
-            moves = self.find_moves(king, i)
-            attacks =  moves & bitmap
-            if attacks == 0:
-                continue
-            attack2 = None
-            attack = len(f'{attacks:b}') - 1
-            if i in [3, 4]:
-                unique = attacks - 2 ** attack
-                if unique != 0:
-                    attack2 = self.rev_convert(len(f'{unique:b}') - 1)
-            attack = self.rev_convert(attack)
-            piece = self.position[attack]
-            if (piece in [-i, i] or (i in [3, 4] and piece in [-5, 5])):
-                checks += 1
-                out |= (moves & self.bitboards[attack] | attacks)
-            if not attack2 is None:
-                piece = self.position[attack2]
-                if (piece in [-i, i] or (i in [3, 4] and piece in [-5, 5])):
-                    checks += 1
-                    out |= (moves & self.bitboards[attack2] | attacks)
-
-        return out, checks
 
     def check_out(self):
         king = self.position.index(6 * self.state[0])
@@ -484,22 +463,25 @@ class Game:
         return self.check_check(king, attacks)
 
     def check_check(self, king, attacks):
-        if attacks & (1 << self.pos_convert(king)) == 0:
+        if attacks & (1 << pos_list[king]) == 0:
             return 0, 0, attacks
 
         checks = 0
         out = 0
-        bitmap = self.piece_bitmap[self.one_convert(-self.state[0])]
+        bitmap = self.piece_bitmap[one_list[-self.state[0]]]
         for i in [1, 2]:
             moves = self.find_moves(king, i)
             p_attacks =  moves & bitmap
-            if p_attacks == 0:
-                continue
-            attack = self.rev_convert(len(f'{p_attacks:b}') - 1)
-            piece = self.position[attack]
-            if piece in [-i, i]:
-                checks += 1
-                out |= (moves & self.bitboards[attack] | p_attacks)
+            while p_attacks:
+                lsb = p_attacks & -p_attacks
+                attack_pos = lsb.bit_length() - 1
+                attack = rev_list[attack_pos]
+                piece = self.position[attack]
+                if piece in [-i, i]:
+                    checks += 1
+                    out |= (moves & self.bitboards[attack] | 1 << attack_pos)
+                    break
+                p_attacks ^= lsb
 
         for i in range(0, 8, 2):
             attack_ray = self.str_move(king, self.str_dirs[i])[0]
@@ -512,7 +494,7 @@ class Game:
                 flag = True
             if p_attacks == 0:
                 continue
-            attack = self.rev_convert(len(f'{p_attacks:b}') - 1)
+            attack = rev_list[p_attacks.bit_length() - 1]
             piece = abs(self.position[attack])
             if piece in [3,4,5] and self.str_dirs[i] in self.piece_moves[piece]:
                 checks += 1
@@ -524,7 +506,7 @@ class Game:
             p_attacks = attack_ray & bitmap
             if p_attacks == 0:
                 continue
-            attack = self.rev_convert(len(f'{p_attacks:b}') - 1)
+            attack = rev_list[p_attacks.bit_length() - 1]
             piece = abs(self.position[attack])
             if piece in [3,4,5] and self.str_dirs[i] in self.piece_moves[piece]:
                 checks += 1
@@ -555,54 +537,138 @@ class Game:
             piece = abs(self.position[start])
             if d_check and piece != 6:
                 continue
+            moves_map = self.bitboards[start]
             p_moves = self.find_legal_moves(
-                start, check, king, check_flag, piece, attacks)
-            lis = []
+                start, check, king, check_flag, piece, attacks, moves_map)
             moves[start] = p_moves
-            #if len(p_moves) != 0:
-            #    moves[start] = p_moves
 
         if len(moves) == 0:
             return {}
 
         return moves
 
-    def find_legal_moves(self, start, check, king, check_flag, piece, attacks):
-        moves = self.bitboards[start]
-        temp = moves & self.piece_bitmap[self.one_convert(self.state[0])]
+    def generate_captures(self):
+        pieces = self.col_checks()
+
+        attacks = self.make_attacks()
+        moves = {}
+        #start_t = time.perf_counter()
+        king = self.position.index(6 * self.state[0])
+        #self.timer += time.perf_counter() - start_t
+        check, check_num, attacks = self.check_check(king, attacks)
+        check_flag = False
+        d_check = False
+        enemies = self.piece_bitmap[one_list[-self.state[0]]]
+
+        if check_num != 0:
+            if check_num > 1:
+                d_check = True
+            else:
+                enemies = check & self.piece_bitmap[one_list[-self.state[0]]]
+                check_flag = True
+
+        for start in pieces:
+            if start == 0:
+                continue
+            piece = abs(self.position[start])
+            if d_check and piece != 6:
+                continue
+            moves_map = self.bitboards[start] & enemies
+            p_moves = self.find_legal_caps(
+                start, check, king, check_flag, piece, attacks, moves_map)
+            moves[start] = p_moves
+
+        return moves
+
+    def find_legal_moves(self, start, check, king, check_flag, piece, attacks, moves):
+        temp = moves & self.piece_bitmap[one_list[self.state[0]]]
         moves ^= temp
         if piece == 1:
             if self.state[2] == "-":
-                moves &= self.piece_bitmap[self.one_convert(-self.state[0])]
+                moves &= self.piece_bitmap[one_list[-self.state[0]]]
             else:
-                moves &= (self.piece_bitmap[self.one_convert(-self.state[0])] | 1 << self.pos_convert(self.state[2]))
+                moves &= (self.piece_bitmap[one_list[-self.state[0]]] | 1 << pos_list[self.state[2]])
             moves |= self.pone_move(start)
+        if moves == 0:
+            return moves
         if piece == 6:
             temp = moves & attacks
             moves ^= temp
         if check_flag:
             if piece != 6:
                 moves &= check
+        if moves == 0:
+            return moves
         else:
             if piece == 6:
                 if self.state[0] == 1:
                     if "K" in self.state[1] and moves & 1 << 61 != 0:
-                        castle = self.check_castle(62, [97], attacks)
+                        castle = self.check_castle(62, [97, 96], attacks)
                         moves |= castle
                     if "Q" in self.state[1] and moves & 1 << 59 != 0:
-                        castle = self.check_castle(58, [93, 92], attacks)
+                        castle = self.check_castle(58, [93, 92, 94], attacks)
                         moves |= castle
                 if self.state[0] == -1:
                     if "k" in self.state[1] and moves & 1 << 5 != 0:
-                        castle = self.check_castle(6, [27], attacks)
+                        castle = self.check_castle(6, [27, 26], attacks)
                         moves |= castle
                     if "q" in self.state[1] and moves & 1 << 3 != 0:
-                        castle = self.check_castle(2, [23, 22], attacks)
+                        castle = self.check_castle(2, [23, 22, 24], attacks)
                         moves |= castle
             pass
 
         if piece != 6:
-            attack =  attacks & (1 << self.pos_convert(start))
+            attack =  attacks & (1 << pos_list[start])
+            if attack == 0:
+                return moves
+            king_dif = start - king
+            if king_dif % 10 == 0:
+                if king_dif > 0:
+                    s_dir = "ver_plus"
+                else:
+                    s_dir = "ver_min"
+            elif king_dif // 8 in [0, -1]:
+                if king_dif > 0:
+                    s_dir = "hor_plus"
+                else:
+                    s_dir = "hor_min"
+            elif king_dif % 11 == 0:
+                if king_dif > 0:
+                    s_dir = "deg_45"
+                else:
+                    s_dir = "deg_225"
+            elif king_dif % 9 == 0:
+                if king_dif > 0:
+                    s_dir = "deg_135"
+                else:
+                    s_dir = "deg_315"
+            else:
+                s_dir = None
+            if s_dir is None:
+                return moves
+            piece_save = self.position[start]
+            self.position[start] = 0
+            dis_check = self.str_move(king, s_dir)
+            attack = dis_check[0] & attack
+            if attack != 0 and not dis_check[1] is None:
+                attack = dis_check[1]
+                if self.position[attack] * self.state[0] < 0 and abs(self.position[attack]) in self.piece_checks[s_dir[:3]]:
+                    moves &= dis_check[0]
+            self.position[start] = piece_save
+        return moves
+
+    def find_legal_caps(self, start, check, king, check_flag, piece, attacks, moves):
+        if piece == 6:
+            temp = moves & attacks
+            moves ^= temp
+        if check_flag:
+            if piece != 6:
+                moves &= check
+        if moves == 0:
+            return moves
+
+        if piece != 6:
+            attack =  attacks & (1 << pos_list[start])
             if attack == 0:
                 return moves
             king_dif = start - king
@@ -648,7 +714,7 @@ class Game:
         for move in moves:
             if self.position[move] != 0:
                 return 0
-        return 1 << self.pos_convert(moves[0])
+        return 1 << pos_list[moves[0]]
 
     def find_moves(self, start, piece):
         out = 0
@@ -656,14 +722,14 @@ class Game:
         if piece == 6:
             for i in king_moves:
                 move = start + i
-                if self.bound_check(move):
+                if self.position[move] == 10:
                     continue
-                out |= 1 << self.pos_convert(move)
+                out |= 1 << pos_list[move]
         elif piece == 1:
-            start_p = self.pos_convert(start)
-            if not self.bound_check(start - 9 * self.state[0]):
+            start_p = pos_list[start]
+            if self.position[start - 9 * self.state[0]] != 10:
                 out |= 1 << start_p - 7 * self.state[0]
-            if not self.bound_check(start - 11 * self.state[0]):
+            if self.position[start - 11 * self.state[0]] != 10:
                 out |= 1 << start_p - 9 * self.state[0]
         elif piece == 2:
             out |= self.kn_move(start)
@@ -678,15 +744,14 @@ class Game:
         out = 0
         end = None
 
-        while True:
-            pos += move
-            if self.bound_check(pos):
-                break
-            elif self.position[pos] != 0:
-                out |= 1 << self.pos_convert(pos)
+        pos += move
+        while self.position[pos] != 10:
+            if self.position[pos] != 0:
+                out |= 1 << pos_list[pos]
                 end = pos
                 break
-            out |= 1 << self.pos_convert(pos)
+            out |= 1 << pos_list[pos]
+            pos += move
         return out, end
 
     def kn_move(self, pos):
@@ -694,9 +759,9 @@ class Game:
 
         for move in knight_moves:
             new_pos = move + pos
-            if self.bound_check(new_pos):
+            if self.position[new_pos] == 10:
                 continue
-            out |= 1 << self.pos_convert(new_pos)
+            out |= 1 << pos_list[new_pos]
 
         return out
 
@@ -704,11 +769,11 @@ class Game:
         out = 0
         one = start - self.state[0] * 10
         if self.position[one] == 0:
-            out |= 1 << self.pos_convert(one)
+            out |= 1 << pos_list[one]
             if start // 10 == 8 or start // 10 == 3:
                 two = one - self.state[0] * 10
                 if self.position[two] == 0:
-                    out |= 1 << self.pos_convert(two)
+                    out |= 1 << pos_list[two]
         return out
 
 game = Game()
