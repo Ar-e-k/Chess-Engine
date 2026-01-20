@@ -18,6 +18,8 @@ class Play:
             self.game = game
         self.game.update()
 
+        self.engine = Engine()
+
         root = tk.Tk()
         frm = tk.ttk.Frame(root, padding=10)
         frm.grid()
@@ -47,6 +49,12 @@ class Play:
         self.update()
         self.evl = None
 
+        self.hsh = tk.Button(
+            frm, text="Hash",
+            command=lambda: print(self.game.hsh),
+            height=3, width=6
+        )
+        self.hsh.grid(column=8, row=0)
         self.ai = tk.Button(
             frm, text="Bot Move",
             command=lambda: self.eng_move(),
@@ -231,7 +239,7 @@ class Play:
         self.update()
         if self.evl is None:
             start_t = time.perf_counter()
-            moves = make_move(self.game, 1)
+            moves = self.engine.make_move(self.game, 1)
             print(f"Move time: {time.perf_counter() - start_t}")
             self.evl = moves
         else:
@@ -285,7 +293,7 @@ class Play:
         self.evl = None
 
 if __name__ == "__main__":
-    from engine import make_move
+    from engine import Engine
     if len(sys.argv) == 1:
         Play()
     else:

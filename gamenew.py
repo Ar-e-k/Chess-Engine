@@ -2,6 +2,7 @@ import time
 import itertools
 from collections import defaultdict
 from dataclasses import dataclass
+import random
 
 import timeit
 import cProfile
@@ -40,6 +41,20 @@ king_moves = [
 
 zero_func = lambda: 0
 
+random.seed(42)
+zob_tab = {}
+for i in range(64):
+    for j in range(13):
+        num = random.randint(0, 1 << 64)
+        while num in zob_tab.values():
+            num = random.randint(0, 1 << 64)
+        zob_tab[(i, j - 6)] = num
+for i in ["K", "Q", "k", "q", "-", 1, -1] + [i for i in range(41, 49)] + [i for i in range(71, 79)]:
+    num = random.randint(0, 1 << 64)
+    while num in zob_tab.values():
+        num = random.randint(0, 1 << 64)
+    zob_tab[i] = num
+
 def print_bits(bits):
     for pos, i in enumerate(f"{bits:064b}"):
         if pos % 8 != 7:
@@ -47,7 +62,7 @@ def print_bits(bits):
         else:
             print(i)
 
-@dataclass
+@dataclass(slots=True)
 class Undo:
     sqr1:int; old1:int; id1:int
     sqr2:int; old2:int; id2:int
@@ -55,6 +70,7 @@ class Undo:
     csl:str
     eps:int; epm:int; ide:int
     bit_map:dict; bitc:int; bito:int
+    hsh:int
 
 class Game:
 
@@ -107,6 +123,8 @@ class Game:
         state[0] = -1 + 2 * (state[0] == "w")
         state[3] = int(state[3])
         state[4] = int(state[4])
+        if state[2] != "-":
+            state[2] = rev_list[ord(state[2][0]) - 97 + (8 - int(state[2][1])) * 8]
 
         self.state = state
         self.position = []
@@ -144,6 +162,18 @@ class Game:
         self.bitboards = [0] * 121
         self.make_bitboard()
 
+        self.hsh = 0
+        i = 0
+        for piece in self.position:
+            if piece == 10:
+                continue
+            self.hsh ^= zob_tab[(i, piece)]
+            i += 1
+        self.hsh ^= zob_tab[self.state[0]]
+        self.hsh ^= zob_tab[self.state[2]]
+        for let in self.state[1]:
+            self.hsh ^= zob_tab[let]
+
     def fen(self):
         fen = ""
         i = 0
@@ -180,7 +210,8 @@ class Game:
         if self.state[2] == "-":
             fen += "-"
         else:
-            fen +=  chr(self.state[2] // 10 + 95) + str(9 - self.state[2] % 10)
+            num = pos_list[self.state[2]]
+            fen += chr(num % 8 + 97) + str(8 - num // 8)
         fen += " " + str(self.state[3]) + " " + str(self.state[4])
         return fen
 
@@ -274,6 +305,7 @@ class Game:
         self.state[2] = move.eps
         for start, bits in move.bit_map.items():
             self.bitboards[start] = bits
+        self.hsh = move.hsh
 
     def update_bitboards(self, start, end, bit_change, takes):
         piece = self.position[start]
@@ -299,10 +331,18 @@ class Game:
         self.position[start] = piece
         return bit_change
 
+    def update_hash(self, start, end):
+        self.hsh ^= zob_tab[(pos_list[start], self.position[start])]
+        self.hsh ^= zob_tab[(pos_list[start], 0)]
+        self.hsh ^= zob_tab[(pos_list[end], self.position[end])]
+        self.hsh ^= zob_tab[(pos_list[end], self.position[start])]
+
     def pone_moved(self, start, end, promotion, bit_change, deltao):
+        self.hsh ^= zob_tab[self.state[2]]
         if self.position[start] in [1, -1]:
             if abs(start - end) == 20:
                 self.state[2] = start - self.state[0] * 10
+                self.hsh ^= zob_tab[self.state[2]]
             elif end == self.state[2]:
                 ep = self.state[2] + self.state[0] * 10
                 self.position[ep] = 0
@@ -321,9 +361,11 @@ class Game:
 
                 deltao = 1 << pos_list[ep]
                 self.state[2] = "-"
+                self.hsh ^= zob_tab["-"]
                 return ep, ide, bit_change, deltao
             else:
                 self.state[2] = "-"
+                self.hsh ^= zob_tab["-"]
 
             if end // 10 in [2, 9]:
                 self.position[start] = 5 * self.state[0]
@@ -331,10 +373,15 @@ class Game:
                 pass
         else:
             self.state[2] = "-"
+            self.hsh ^= zob_tab["-"]
         return -1, -1, bit_change, deltao
 
     def king_move(self, start, end, bit_change, deltac):
         if self.position[start] == 6:
+            if "K" in self.state[1]:
+                self.hsh ^= zob_tab["K"]
+            if "Q" in self.state[1]:
+                self.hsh ^= zob_tab["Q"]
             self.state[1] = self.state[1].replace("K", "")
             self.state[1] = self.state[1].replace("Q", "")
 
@@ -349,6 +396,10 @@ class Game:
                 idc, dlc = self.castle(91, 94, 0, 1, rays)
                 return 91, 94, idc, bit_change, deltac | dlc
         elif self.position[start] == -6:
+            if "k" in self.state[1]:
+                self.hsh ^= zob_tab["k"]
+            if "q" in self.state[1]:
+                self.hsh ^= zob_tab["q"]
             self.state[1] = self.state[1].replace("k", "")
             self.state[1] = self.state[1].replace("q", "")
 
@@ -365,6 +416,7 @@ class Game:
         return -1, -1, -1, bit_change, deltac
 
     def castle(self, start, end, p_index, side, rays):
+        self.update_hash(start, end)
         self.position[start] = 0
         self.position[end] = side * 4
         idc = self.pieces[p_index].index(start)
@@ -387,6 +439,11 @@ class Game:
             id1 = self.pieces[p_index].index(start)
             old1 = self.position[start]
             old2 = self.position[end]
+            old_hsh = self.hsh
+
+            self.update_hash(start, end)
+            self.hsh ^= zob_tab[self.state[0]]
+            self.hsh ^= zob_tab[-self.state[0]]
 
             deltac = 1 << pos_list[start] | 1 << pos_list[end]
             deltao = 0
@@ -403,12 +460,20 @@ class Game:
 
             if self.position[start] in [4, -4]:
                 if start == 21:
+                    if "q" in self.state[1]:
+                        self.hsh ^= zob_tab["q"]
                     self.state[1] = self.state[1].replace("q", "")
                 elif start == 28:
+                    if "k" in self.state[1]:
+                        self.hsh ^= zob_tab["k"]
                     self.state[1] = self.state[1].replace("k", "")
                 elif start == 91:
+                    if "Q" in self.state[1]:
+                        self.hsh ^= zob_tab["Q"]
                     self.state[1] = self.state[1].replace("Q", "")
                 elif start == 98:
+                    if "K" in self.state[1]:
+                        self.hsh ^= zob_tab["K"]
                     self.state[1] = self.state[1].replace("K", "")
 
             move_s = Undo(
@@ -417,7 +482,8 @@ class Game:
                 sqr3=c1, sqr4=c2, idc=idc,
                 csl=cs,
                 eps=es, epm=ep, ide=ide,
-                bit_map=delta, bitc=deltac, bito=deltao
+                bit_map=delta, bitc=deltac, bito=deltao,
+                hsh=old_hsh
             )
             self.moves_made.append(move_s)
 

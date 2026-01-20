@@ -1,6 +1,7 @@
 import random
 from collections import defaultdict
 import time
+from dataclasses import dataclass
 
 import cProfile
 
@@ -38,121 +39,173 @@ capture_conv = {
     -6: 0
 }
 
-def make_move(game, depth=2):
-    if depth == -1:
-        return [[0, score_position(game), 0, 0]]
-    game.update()
-    pos_moves = []
-    all_moves = game.possible_moves_out()
-    for start, moves in all_moves.items():
-        for move in moves:
-            game.move(start, move, flag=True)
-            pos_moves.append(
-                [None,
-                 -search(game, 0, -inf, inf),
-                 start, move])
-            game.undo_move()
-    for i in range(1, depth + 1):
+@dataclass(slots=True)
+class TTEntry:
+    key: int
+    depth: int
+    score: int
+    flag: int
+    move: int
+    age: int
+
+class Engine:
+
+    def __init__(self, tt_size=20):
+        self.tt_size = (1 << tt_size) - 1
+        self.tt = [None] * self.tt_size
+
+    def add_tt(self, game, score, move, flag):
+        hsh = game.hsh
+        idx = hsh & self.tt_size
+        if self.tt[idx] is None:
+            self.tt[idx] = TTEntry(
+                key = hsh, depth=self.depth, score=score,
+                move=move[0] * 1000 + move[1][0], flag=0, age=0
+            )
+        else:
+            if self.tt[idx].depth - self.tt[idx].age <= self.depth:
+                self.tt[idx] = TTEntry(
+                    key = hsh, depth=self.depth, score=score,
+                    move=move[0] * 1000 + move[1][0], flag=0, age=0
+                )
+            else:
+                self.tt[idx].age += 0
+
+    def get_tt(self, hsh):
+        idx = hsh & self.tt_size
+        #if self.tt[idx] is not None:
+        #    print(self.depth, self.tt[idx].depth)
+        if self.tt[idx] is None or self.tt[idx].depth < self.depth or self.tt[idx].key != hsh:
+            return False, None
+        return True, self.tt[idx].score
+
+    def make_move(self, game, depth=2):
+        if depth == -1:
+            return [[0, self.score_position(game), 0, 0]]
+        game.update()
+        pos_moves = []
+        all_moves = game.possible_moves_out()
+        self.depth = 0
+        for start, moves in all_moves.items():
+            for move in moves:
+                game.move(start, move, flag=True)
+                pos_moves.append(
+                    [None,
+                     -self.search(game, 0, -inf, inf),
+                     start, move])
+                game.undo_move()
+        for i in range(1, depth + 1):
+            self.depth = i
+            pos_moves = sorted(pos_moves, key=lambda x: x[1], reverse=True)
+            best = -inf
+            for pos, move in enumerate(pos_moves):
+                game.move(move[2], move[3], flag=True)
+                score = -self.search(game, i, -inf, -best)
+                pos_moves[pos][1] = score
+                best = max(score, best)
+                game.undo_move()
+
         pos_moves = sorted(pos_moves, key=lambda x: x[1], reverse=True)
+        return pos_moves
+
+    def search(self, game, depth, alpha, beta):
+        tt = self.get_tt(game.hsh)
+        if tt[0]:
+            return tt[1]
+
+        if depth == 0:
+            return self.q_search(game, alpha, beta)
+            #return self.score_position(game)
+
         best = -inf
-        for pos, move in enumerate(pos_moves):
-            game.move(move[2], move[3], flag=True)
-            score = -search(game, i, -inf, -best)
-            pos_moves[pos][1] = score
-            best = max(score, best)
-            game.undo_move()
+        game.update()
+        all_moves = game.possible_moves_out()
+        if len(all_moves) == 0:
+            if len(game.check_out()) == 0:
+                return 0
+            return -inf
 
-    pos_moves = sorted(pos_moves, key=lambda x: x[1], reverse=True)
-    return pos_moves
+        for start, moves in all_moves.items():
+            for move in moves:
+                if alpha >= beta:
+                    self.add_tt(game, best, (0,(0,0)), 0)
+                    return best
+                game.move(start, move, flag=True)
+                score = -self.search(game, depth - 1, -beta, -alpha)
+                game.undo_move()
+                best = max(best, score)
+                alpha = max(alpha, score)
 
-def search(game, depth, alpha, beta):
-    if depth == 0:
-        return q_search(game, alpha, beta)
-        #return score_position(game)
+        self.add_tt(game, best, (0,(0,0)), 0)
+        return best
 
-    best = -inf
-    game.update()
-    all_moves = game.possible_moves_out()
-    if len(all_moves) == 0:
-        if len(game.check_out()) == 0:
-            return 0
-        return -inf
+    def q_search(self, game, alpha, beta):
+        game.update_captures()
+        all_moves = game.captures_out()
+        if len(all_moves) == 0:
+            game.update()
+            if len(game.possible_moves_out()) == 0:
+                if game.check_out()[1] == 0:
+                    return 0
+                return -inf
+        initial = self.score_position(game)
+        best = initial
 
-    for start, moves in all_moves.items():
-        for move in moves:
+        captures = []
+
+        for start, moves in all_moves.items():
+            for move in moves:
+                move_val = capture_conv[
+                    game.position[move]] * 6 - capture_conv[game.position[start]]
+                captures.append((start, move, move_val))
+        captures = sorted(captures, key=lambda x: x[2], reverse=True)
+
+        for start, move, _ in captures:
             if alpha >= beta:
                 return best
-            game.move(start, move, flag=True)
-            score = -search(game, depth - 1, -beta, -alpha)
+            game.move(start, (move, None), flag=True)
+            score = -self.q_search(game, -beta, -alpha)
             game.undo_move()
             best = max(best, score)
             alpha = max(alpha, score)
 
-    return best
+        return best
 
-def q_search(game, alpha, beta):
-    game.update_captures()
-    all_moves = game.captures_out()
-    if len(all_moves) == 0:
-        game.update()
-        if len(game.possible_moves_out()) == 0:
-            if game.check_out()[1] == 0:
-                return 0
-            return -inf
-    initial = score_position(game)
-    best = initial
+    def score_position(self, game):
+        own_pieces = game.col_checks()
+        op_pieces = game.col_checks(op=-1)
+        score = self.score_side(own_pieces, game) - self.score_side(op_pieces, game)
 
-    captures = []
+        return score
 
-    for start, moves in all_moves.items():
-        for move in moves:
-            move_val = capture_conv[
-                game.position[move]] * 6 - capture_conv[game.position[start]]
-            captures.append((start, move, move_val))
-    captures = sorted(captures, key=lambda x: x[2], reverse=True)
+    def score_side(self, pieces, game):
+        score = 0
+        for i in pieces:
+            if i == 0:
+                continue
+            score += self.score_piece(game, i)
+        return score
 
-    for start, move, _ in captures:
-        if alpha >= beta:
-            return best
-        game.move(start, (move, None), flag=True)
-        score = -q_search(game, -beta, -alpha)
-        game.undo_move()
-        best = max(best, score)
-        alpha = max(alpha, score)
-
-    return best
-
-def score_position(game):
-    own_pieces = game.col_checks()
-    op_pieces = game.col_checks(op=-1)
-    score = score_side(own_pieces, game) - score_side(op_pieces, game)
-
-    return score
-
-def score_side(pieces, game):
-    score = 0
-    for i in pieces:
-        if i == 0:
-            continue
-        score += score_piece(game, i)
-    return score
-
-def score_piece(game, pos):
-    piece = game.position[pos]
-    return point_conv[piece]
+    def score_piece(self, game, pos):
+        piece = game.position[pos]
+        return point_conv[piece]
 
 def time_test():
-    cProfile.run('game = Game("r1b1k2r/ppppnppp/2n2q2/2b5/2BNP3/2P1B3/PP3PPP/RN1QK2R b KQkq - 2 7"); make_move(game, depth=1); print(game.timer)')
+    game = Game("r1b1k2r/ppppnppp/2n2q2/2b5/2BNP3/2P1B3/PP3PPP/RN1QK2R b KQkq - 2 7")
+    game = Game()
+    engine = Engine()
+    cProfile.runctx(
+        'engine.make_move(game, depth=4); print(game.timer)',
+        {'game': game, 'engine': engine}, {})
 
 def debug_test():
     game = Game("r1b1k2r/ppppnppp/2n2q2/2b5/2BNP3/2P1B3/PP3PPP/RN1QK2R b KQkq - 2 7")
-    make_move(game, depth=2)
+    #game = Game()
+    engine = Engine()
+    engine.make_move(game, depth=2)
 
 def testing():
-    game = Game(fen="r1b1k2r/pBppnppp/5q2/8/4P3/2P1b3/PP3PPP/RN1QK2R w KQk - 1 11")
-    game = Game(fen="B1b1k2r/p1ppnppp/5q2/8/4P3/2P1b3/PP3PPP/RN1QK2R b KQk - 0 11")
-    score = -search(game, 1, -inf, 0)
-    print(score * game.state[0])
+    return None
 
 def main():
     game = Game()
