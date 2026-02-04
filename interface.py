@@ -18,7 +18,10 @@ class Play:
             self.game = game
         self.game.update()
 
-        self.engine = Engine()
+        try:
+            self.engine = Engine()
+        except:
+            pass
 
         root = tk.Tk()
         frm = tk.ttk.Frame(root, padding=10)
@@ -55,6 +58,19 @@ class Play:
             height=3, width=6
         )
         self.hsh.grid(column=8, row=0)
+        self.fen = tk.Button(
+            frm, text="Fen",
+            command=lambda: print(self.game.fen()),
+            height=3, width=6
+        )
+        self.fen.grid(column=9, row=0)
+        self.undo = tk.Button(
+            frm, text="Undo",
+            command=lambda: self.undo_move(),
+            height=3, width=6
+        )
+        self.undo.grid(column=10, row=0)
+
         self.ai = tk.Button(
             frm, text="Bot Move",
             command=lambda: self.eng_move(),
@@ -67,12 +83,7 @@ class Play:
             height=3, width=6
         )
         self.ai_ev.grid(column=9, row=1)
-        self.ai_piece = tk.Button(
-            frm, text="P-Eval",
-            command=lambda: self.eng_evl_piece(),
-            height=3, width=6
-        )
-        self.ai_piece.grid(column=9, row=3)
+
         self.ai_all = tk.Button(
             frm, text="B-Eval",
             command=lambda: self.eng_evl_all(),
@@ -85,48 +96,78 @@ class Play:
             height=3, width=6
         )
         self.ai_worst.grid(column=9, row=2)
-        self.undo = tk.Button(
-            frm, text="Undo",
-            command=lambda: self.undo_move(),
+        self.ai_piece = tk.Button(
+            frm, text="P-Eval",
+            command=lambda: self.eng_evl_piece(),
             height=3, width=6
         )
-        self.undo.grid(column=8, row=3)
+        self.ai_piece.grid(column=10, row=2)
+
+        self.pones = tk.Button(
+            frm, text="Pones",
+            command=lambda: self.view_bitmap(self.game.piece_bitmap[3]),
+            height=3, width=6
+        )
+        self.pones.grid(column=8, row=3)
+        self.knights = tk.Button(
+            frm, text="Knights",
+            command=lambda: self.view_bitmap(self.game.piece_bitmap[4]),
+            height=3, width=6
+        )
+        self.knights.grid(column=9, row=3)
+
+        self.diag = tk.Button(
+            frm, text="Diag",
+            command=lambda: self.view_bitmap(self.game.piece_bitmap[5]),
+            height=3, width=6
+        )
+        self.diag.grid(column=8, row=4)
+        self.strg = tk.Button(
+            frm, text="Straight",
+            command=lambda: self.view_bitmap(self.game.piece_bitmap[6]),
+            height=3, width=6
+        )
+        self.strg.grid(column=9, row=4)
+
         self.white = tk.Button(
             frm, text="White",
             command=lambda: self.view_bitmap(self.game.piece_bitmap[0]),
             height=3, width=6
         )
-        self.white.grid(column=8, row=4)
+        self.white.grid(column=8, row=5)
         self.black = tk.Button(
             frm, text="Black",
             command=lambda: self.view_bitmap(self.game.piece_bitmap[1]),
             height=3, width=6
         )
-        self.black.grid(column=9, row=4)
+        self.black.grid(column=9, row=5)
+
         self.white_rays= tk.Button(
             frm, text="W-rays",
             command=lambda: self.view_bitmap(self.game.make_attacks(self.game.state[0])),
             height=3, width=6
         )
-        self.white_rays.grid(column=8, row=5)
+        self.white_rays.grid(column=8, row=6)
         self.black_rays = tk.Button(
             frm, text="B-rays",
             command=lambda: self.view_bitmap(self.game.make_attacks(-self.game.state[0])),
             height=3, width=6
         )
-        self.black_rays.grid(column=9, row=5)
+        self.black_rays.grid(column=9, row=6)
+
         self.ray = tk.Button(
             frm, text="Ray",
-            command=lambda: self.view_ray(),
+            command=lambda: self.view_piece_bitmap(self.game.bitboards),
             height=3, width=6
         )
-        self.ray.grid(column=8, row=6)
-        self.fen = tk.Button(
-            frm, text="Fen",
-            command=lambda: print(self.game.fen()),
+        self.ray.grid(column=8, row=7)
+
+        self.caps = tk.Button(
+            frm, text="Caps",
+            command=lambda: self.view_piece_bitmap(self.game.capboards),
             height=3, width=6
         )
-        self.fen.grid(column=9, row=6)
+        self.caps.grid(column=9, row=7)
 
         input()
 
@@ -219,10 +260,10 @@ class Play:
         i, j = self.revert(move.sqr2)
         self.buttons[i][j].config(bg="#4682B4")
 
-    def view_ray(self):
+    def view_piece_bitmap(self, bmap):
         if self.selected is None:
             return None
-        self.view_bitmap(self.game.bitboards[self.convert(*self.selected)])
+        self.view_bitmap(bmap[self.convert(*self.selected)])
 
     def view_bitmap(self, bmap):
         row = []

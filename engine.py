@@ -73,10 +73,10 @@ class Engine:
 
     def get_tt(self, hsh):
         idx = hsh & self.tt_size
-        #if self.tt[idx] is not None:
-        #    print(self.depth, self.tt[idx].depth)
-        if self.tt[idx] is None or self.tt[idx].depth < self.depth or self.tt[idx].key != hsh:
-            return False, None
+        if self.tt[idx] is None or self.tt[idx].key != hsh:
+            return False, -inf
+        elif self.tt[idx].depth < self.depth:
+            return False, self.tt[idx].score
         return True, self.tt[idx].score
 
     def make_move(self, game, depth=2):
@@ -114,7 +114,9 @@ class Engine:
             return tt[1]
 
         if depth == 0:
-            return self.q_search(game, alpha, beta)
+            best = self.q_search(game, alpha, beta)
+            self.add_tt(game, best, (0,(0,0)), 0)
+            return best
             #return self.score_position(game)
 
         best = -inf
@@ -125,6 +127,17 @@ class Engine:
                 return 0
             return -inf
 
+        # BUG sorting moves decreases efficiency
+        '''
+        moves_ord = []
+        for start, moves in all_moves.items():
+            for move in moves:
+                bet, score = self.get_tt(game.move_hash(start, move))
+                moves_ord.append((start, move, score))
+        moves_ord = sorted(moves_ord, key=lambda x: x[2], reverse=True)
+
+        for start, move, _ in moves_ord:
+        '''
         for start, moves in all_moves.items():
             for move in moves:
                 if alpha >= beta:
@@ -140,11 +153,15 @@ class Engine:
         return best
 
     def q_search(self, game, alpha, beta):
-        game.update_captures()
+        try:
+            game.update_captures()
+        except:
+            print(game.moves_made[-1])
+            game.undo_move()
+            Play(game)
         all_moves = game.captures_out()
         if len(all_moves) == 0:
-            game.update()
-            if len(game.possible_moves_out()) == 0:
+            if game.check_end():
                 if game.check_out()[1] == 0:
                     return 0
                 return -inf
@@ -183,19 +200,17 @@ class Engine:
         for i in pieces:
             if i == 0:
                 continue
-            score += self.score_piece(game, i)
+            piece = game.position[i]
+            piece_val = point_conv[piece]
+            score += piece_val
         return score
-
-    def score_piece(self, game, pos):
-        piece = game.position[pos]
-        return point_conv[piece]
 
 def time_test():
     game = Game("r1b1k2r/ppppnppp/2n2q2/2b5/2BNP3/2P1B3/PP3PPP/RN1QK2R b KQkq - 2 7")
-    game = Game()
+    #game = Game()
     engine = Engine()
     cProfile.runctx(
-        'engine.make_move(game, depth=4); print(game.timer)',
+        'engine.make_move(game, depth=2); print(game.timer)',
         {'game': game, 'engine': engine}, {})
 
 def debug_test():

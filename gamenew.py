@@ -3,6 +3,7 @@ import itertools
 from collections import defaultdict
 from dataclasses import dataclass
 import random
+import pickle
 
 import timeit
 import cProfile
@@ -55,6 +56,12 @@ for i in ["K", "Q", "k", "q", "-", 1, -1] + [i for i in range(41, 49)] + [i for 
         num = random.randint(0, 1 << 64)
     zob_tab[i] = num
 
+big_num = (1 << 64) - 1
+with open("Magic_file.magic", "rb") as fil:
+    bishop_magic, rook_magic = pickle.load(fil)
+bishop_magic, bishop_tables, bishop_shifts, bishop_full = bishop_magic
+rook_magic, rook_tables, rook_shifts, rook_full = rook_magic
+
 def print_bits(bits):
     for pos, i in enumerate(f"{bits:064b}"):
         if pos % 8 != 7:
@@ -70,6 +77,7 @@ class Undo:
     csl:str
     eps:int; epm:int; ide:int
     bit_map:dict; bitc:int; bito:int
+    pn:int; kn:int; dp:int; sp:int
     hsh:int
 
 class Game:
@@ -151,13 +159,14 @@ class Game:
             [pos for pos, i in enumerate(self.position) if 7 > i > 0] + [0],
             [pos for pos, i in enumerate(self.position) if 7 > -i > 0] + [0]
         ]
-        white = 0
-        for i in self.pieces[0][:-1]:
-            white |= 1 << pos_list[i]
-        black = 0
-        for i in self.pieces[1][:-1]:
-            black |= 1 << pos_list[i]
-        self.piece_bitmap = [white, black]
+        white = self.type_bitboard(lambda x: 0 < x < 10)
+        black = self.type_bitboard(lambda x: 0 > x)
+        al = white | black
+        pones = self.type_bitboard(lambda x: abs(x) == 1)
+        knights = self.type_bitboard(lambda x: abs(x) == 2)
+        diag = self.type_bitboard(lambda x: abs(x) in [3, 5])
+        strg = self.type_bitboard(lambda x: abs(x) in [4, 5])
+        self.piece_bitmap = [white, black, al, pones, knights, diag, strg]
 
         self.bitboards = [0] * 121
         self.make_bitboard()
@@ -214,6 +223,13 @@ class Game:
             fen += chr(num % 8 + 97) + str(8 - num // 8)
         fen += " " + str(self.state[3]) + " " + str(self.state[4])
         return fen
+
+    def type_bitboard(self, cond):
+        out = 0
+        for pos, i in enumerate(self.position):
+            if cond(i):
+                out |= 1 << pos_list[pos]
+        return out
 
     def make_bitboard(self):
         for pos, start in enumerate(self.position):
@@ -303,39 +319,75 @@ class Game:
         self.state[3] = (self.state[3] - 1) % 2
         self.state[1] = move.csl
         self.state[2] = move.eps
+        start_t = time.perf_counter()
         for start, bits in move.bit_map.items():
             self.bitboards[start] = bits
+        self.timer += time.perf_counter() - start_t
         self.hsh = move.hsh
+        self.piece_bitmap[2] = self.piece_bitmap[0] | self.piece_bitmap[1]
+        self.piece_bitmap[3] ^= move.pn
+        self.piece_bitmap[4] ^= move.kn
+        self.piece_bitmap[5] ^= move.dp
+        self.piece_bitmap[6] ^= move.sp
 
     def update_bitboards(self, start, end, bit_change, takes):
         piece = self.position[start]
-        self.position[start] = 0
-        new_ray = self.find_moves(end, abs(piece))
-        self.bitboards[end] = new_ray
+        new_ray_magic = self.find_moves_magic(end, abs(piece))
+        self.bitboards[end] = new_ray_magic
 
-        deltas_old = self.check_rays(start)
-        for pos, delta in deltas_old.items():
-            if pos == end:
-                continue
-            bit_change.setdefault(pos, self.bitboards[pos])
-            self.bitboards[pos] |= delta
+        cols = (
+            self.find_moves_magic(start, 3) & self.piece_bitmap[5] |
+            self.find_moves_magic(start, 4) & self.piece_bitmap[6]
+        ) & (big_num ^ (1 << pos_list[end]))
+
         if takes:
-            self.position[start] = piece
+            while cols:
+                lsb = cols & -cols
+                pos = lsb.bit_length() - 1
+                pos = rev_list[pos]
+                cols ^= lsb
+                new_moves = self.find_moves_magic(pos, abs(self.position[pos]))
+                bit_change.setdefault(pos, self.bitboards[pos])
+                self.bitboards[pos] = new_moves
             return bit_change
-        deltas_new = self.check_rays(end)
-        for pos, delta in deltas_new.items():
-            bit_change.setdefault(pos, self.bitboards[pos])
-            self.bitboards[pos] ^= delta
-            self.bitboards[pos] |= 1 << pos_list[end]
 
-        self.position[start] = piece
+        cols |= (
+            self.find_moves_magic(end, 3) & self.piece_bitmap[5] |
+            self.find_moves_magic(end, 4) & self.piece_bitmap[6]
+        )
+        while cols:
+            lsb = cols & -cols
+            pos = lsb.bit_length() - 1
+            pos = rev_list[pos]
+            cols ^= lsb
+            new_moves = self.find_moves_magic(pos, abs(self.position[pos]))
+            bit_change.setdefault(pos, self.bitboards[pos])
+            self.bitboards[pos] = new_moves
+
         return bit_change
 
-    def update_hash(self, start, end):
-        self.hsh ^= zob_tab[(pos_list[start], self.position[start])]
-        self.hsh ^= zob_tab[(pos_list[start], 0)]
-        self.hsh ^= zob_tab[(pos_list[end], self.position[end])]
-        self.hsh ^= zob_tab[(pos_list[end], self.position[start])]
+    def update_piece_bitboard(self, start, piece):
+        pn, kn, dp, sp = 0, 0, 0, 0
+        if piece in [1, -1]:
+            pn = 1 << pos_list[start]
+            self.piece_bitmap[3] ^= pn
+        elif piece in [2, -2]:
+            kn = 1 << pos_list[start]
+            self.piece_bitmap[4] ^= kn
+        if piece in [3, -3, 5, -5]:
+            dp = 1 << pos_list[start]
+            self.piece_bitmap[5] ^= dp
+        if piece in [4, -4, 5, -5]:
+            sp = 1 << pos_list[start]
+            self.piece_bitmap[6] ^= sp
+        return pn, kn, dp, sp
+
+    def update_hash(self, start, end, hsh):
+        hsh ^= zob_tab[(pos_list[start], self.position[start])]
+        hsh ^= zob_tab[(pos_list[start], 0)]
+        hsh ^= zob_tab[(pos_list[end], self.position[end])]
+        hsh ^= zob_tab[(pos_list[end], self.position[start])]
+        return hsh
 
     def pone_moved(self, start, end, promotion, bit_change, deltao):
         self.hsh ^= zob_tab[self.state[2]]
@@ -376,7 +428,7 @@ class Game:
             self.hsh ^= zob_tab["-"]
         return -1, -1, bit_change, deltao
 
-    def king_move(self, start, end, bit_change, deltac):
+    def king_move(self, start, end):
         if self.position[start] == 6:
             if "K" in self.state[1]:
                 self.hsh ^= zob_tab["K"]
@@ -386,15 +438,17 @@ class Game:
             self.state[1] = self.state[1].replace("Q", "")
 
             if end - start == 2:
+                rook = (1 << 61) | (1 << 63)
+                self.piece_bitmap[2] |= pos_list[end]
                 rays = ["hor_min", "ver_min"]
-                #bit_change[98] = self.bitboards[98]
-                idc, dlc = self.castle(98, 96, 0, 1, rays)
-                return 98, 96, idc, bit_change, deltac | dlc
+                idc = self.castle(98, 96, 0, 1, rays)
+                return 98, 96, idc, rook
             elif end - start == -2:
+                rook = (1 << 56) | (1 << 59)
+                self.piece_bitmap[2] |= pos_list[end]
                 rays = ["hor_plus", "ver_min"]
-                #bit_change[91] = self.bitboards[91]
-                idc, dlc = self.castle(91, 94, 0, 1, rays)
-                return 91, 94, idc, bit_change, deltac | dlc
+                idc = self.castle(91, 94, 0, 1, rays)
+                return 91, 94, idc, rook
         elif self.position[start] == -6:
             if "k" in self.state[1]:
                 self.hsh ^= zob_tab["k"]
@@ -404,29 +458,81 @@ class Game:
             self.state[1] = self.state[1].replace("q", "")
 
             if end - start == 2:
+                rook = (1 << 5) | (1 << 7)
+                self.piece_bitmap[2] |= pos_list[end]
                 rays = ["hor_min", "ver_plus"]
-                idc, dlc = self.castle(28, 26, 1, -1, rays)
-                bit_change[28] = self.bitboards[28]
-                return 28, 26, idc, bit_change, deltac | dlc
+                idc = self.castle(28, 26, 1, -1, rays)
+                return 28, 26, idc, rook
             elif end - start == -2:
+                rook = (1 << 0) | (1 << 3)
+                self.piece_bitmap[2] |= pos_list[end]
                 rays = ["hor_plus", "ver_plus"]
-                idc, dlc = self.castle(21, 24, 1, -1, rays)
-                bit_change[21] = self.bitboards[21]
-                return 21, 24, idc, bit_change, deltac | dlc
-        return -1, -1, -1, bit_change, deltac
+                idc = self.castle(21, 24, 1, -1, rays)
+                return 21, 24, idc, rook
+        return -1, -1, -1, 0
 
     def castle(self, start, end, p_index, side, rays):
-        self.update_hash(start, end)
+        self.hsh = self.update_hash(start, end, self.hsh)
         self.position[start] = 0
         self.position[end] = side * 4
         idc = self.pieces[p_index].index(start)
         self.pieces[p_index][idc] = end
-        deltac = 1 << pos_list[start] | 1 << pos_list[end]
-        moves = 0
-        for ray in rays:
-            moves |= self.str_move(end, ray)[0]
-        self.bitboards[end] = moves
-        return idc, deltac
+
+        return idc
+
+    def move_hash(self, start, end):
+        end = end[0]
+
+        hsh = self.hsh
+
+        hsh = self.update_hash(start, end, hsh)
+
+        hsh ^= zob_tab[self.state[0]]
+        hsh ^= zob_tab[-self.state[0]]
+
+        hsh ^= zob_tab[self.state[2]]
+        if self.position[start] in [1, -1] and abs(start - end) == 20:
+            enp = start - self.state[0] * 10
+            hsh ^= zob_tab[enp]
+        else:
+            hsh ^= zob_tab["-"]
+
+        if self.position[start] == 6:
+            if "K" in self.state[1]:
+                self.hsh ^= zob_tab["K"]
+            if "Q" in self.state[1]:
+                self.hsh ^= zob_tab["Q"]
+
+            if end - start == 2:
+                hsh = self.update_hash(98, 96, hsh)
+            elif end - start == -2:
+                hsh = self.update_hash(91, 94, hsh)
+        elif self.position[start] == -6:
+            if "k" in self.state[1]:
+                self.hsh ^= zob_tab["k"]
+            if "q" in self.state[1]:
+                self.hsh ^= zob_tab["q"]
+
+            if end - start == 2:
+                hsh = self.update_hash(28, 26, hsh)
+            elif end - start == -2:
+                hsh = self.update_hash(21, 24, hsh)
+
+        if self.position[start] in [4, -4]:
+            if start == 21:
+                if "q" in self.state[1]:
+                    hsh ^= zob_tab["q"]
+            elif start == 28:
+                if "k" in self.state[1]:
+                    hsh ^= zob_tab["k"]
+            elif start == 91:
+                if "Q" in self.state[1]:
+                    hsh ^= zob_tab["Q"]
+            elif start == 98:
+                if "K" in self.state[1]:
+                    hsh ^= zob_tab["K"]
+
+        return hsh
 
     def move(self, start, end, promotion=None, flag=False):
         if flag or end in self.possible_moves_out()[start]:
@@ -441,7 +547,14 @@ class Game:
             old2 = self.position[end]
             old_hsh = self.hsh
 
-            self.update_hash(start, end)
+            pn, kn, dp, sp = self.update_piece_bitboard(start, old1)
+            pn2, kn2, dp2, sp2 = self.update_piece_bitboard(end, old1)
+            pn ^= pn2
+            kn ^= kn2
+            dp ^= dp2
+            sp ^= sp2
+
+            self.hsh = self.update_hash(start, end, self.hsh)
             self.hsh ^= zob_tab[self.state[0]]
             self.hsh ^= zob_tab[-self.state[0]]
 
@@ -453,10 +566,24 @@ class Game:
                 id2 = self.pieces[o_index].index(end)
                 self.pieces[o_index][id2] = 0
                 deltao = 1 << pos_list[end]
+                pn2, kn2, dp2, sp2 = self.update_piece_bitboard(end, old2)
+                pn ^= pn2
+                kn ^= kn2
+                dp ^= dp2
+                sp ^= sp2
 
             ep, ide, delta, deltao = self.pone_moved(start, end, promotion, delta, deltao)
+
+            c1, c2, idc, rook = self.king_move(start, end)
+            deltac |= rook
+            sp |= rook
+            self.piece_bitmap[6] ^= rook
+
+            self.piece_bitmap[p_index] ^= deltac
+            self.piece_bitmap[o_index] ^= deltao
+            self.piece_bitmap[2] = self.piece_bitmap[0] | self.piece_bitmap[1]
+
             delta = self.update_bitboards(start, end, delta, old2!=0)
-            c1, c2, idc, delta, deltac = self.king_move(start, end, delta, deltac)
 
             if self.position[start] in [4, -4]:
                 if start == 21:
@@ -483,12 +610,11 @@ class Game:
                 csl=cs,
                 eps=es, epm=ep, ide=ide,
                 bit_map=delta, bitc=deltac, bito=deltao,
+                pn=pn, kn=kn, dp=dp, sp=sp,
                 hsh=old_hsh
             )
             self.moves_made.append(move_s)
 
-            self.piece_bitmap[p_index] ^= deltac
-            self.piece_bitmap[o_index] ^= deltao
             self.position[end] = self.position[start]
             self.position[start] = 0
             self.state[0] *= -1
@@ -503,26 +629,6 @@ class Game:
             out |= self.bitboards[i]
         return out
 
-    def check_rays(self, start):
-        deltas = defaultdict(zero_func)
-        rays = []
-        for key in self.str_dirs:
-            out, end = self.str_move(start, key)
-            rays.append((out, end, key[:3]))
-        i = -1
-        for out, end, key in rays:
-            i += 1
-            if end is None or end == start:
-                continue
-            piece = abs(self.position[end])
-
-            if piece in self.piece_checks[key]:
-                deltas[end] |= rays[i + self.zero_convert(i % 2)][0] | 1 << pos_list[start]
-            elif piece == 6 and out.bit_count() == 1:
-                deltas[end] |= 1 << pos_list[start]
-
-        return deltas
-
     def check_out(self):
         king = self.position.index(6 * self.state[0])
         attacks = self.make_attacks()
@@ -536,7 +642,7 @@ class Game:
         out = 0
         bitmap = self.piece_bitmap[one_list[-self.state[0]]]
         for i in [1, 2]:
-            moves = self.find_moves(king, i)
+            moves = self.find_moves_magic(king, i)
             p_attacks =  moves & bitmap
             while p_attacks:
                 lsb = p_attacks & -p_attacks
@@ -581,6 +687,36 @@ class Game:
 
         return out, checks, attacks
 
+    def check_end(self):
+        pieces = self.col_checks()
+
+        attacks = self.make_attacks()
+        moves = {}
+        king = self.position.index(6 * self.state[0])
+        check, check_num, attacks = self.check_check(king, attacks)
+        check_flag = False
+        d_check = False
+
+        if check_num != 0:
+            if check_num > 1:
+                d_check = True
+            else:
+                check_flag = True
+
+        for start in pieces:
+            if start == 0:
+                continue
+            piece = abs(self.position[start])
+            if d_check and piece != 6:
+                continue
+            moves_map = self.bitboards[start]
+            p_moves = self.find_legal_moves(
+                start, check, king, check_flag, piece, attacks, moves_map)
+            if p_moves != 0:
+                return False
+
+        return True
+
     def generate_moves(self):
         pieces = self.col_checks()
 
@@ -618,9 +754,7 @@ class Game:
 
         attacks = self.make_attacks()
         moves = {}
-        #start_t = time.perf_counter()
         king = self.position.index(6 * self.state[0])
-        #self.timer += time.perf_counter() - start_t
         check, check_num, attacks = self.check_check(king, attacks)
         check_flag = False
         d_check = False
@@ -802,6 +936,40 @@ class Game:
         elif piece in [3, 4, 5]:
             for name in self.piece_moves[piece]:
                 out |= self.str_move(start, name)[0]
+
+        return out
+
+    def find_moves_magic(self, start, piece):
+        out = 0
+
+        if piece in [3, 4, 5]:
+            bit_start = pos_list[start]
+            if piece in [3, 5]:
+                idx = ((
+                    (self.piece_bitmap[2] & bishop_full[bit_start])
+                    * bishop_magic[bit_start]) & big_num
+                       ) >> bishop_shifts[bit_start]
+                out |= bishop_tables[bit_start][idx]
+            if piece in [4, 5]:
+                idx = ((
+                    (self.piece_bitmap[2] & rook_full[bit_start])
+                    * rook_magic[bit_start]) & big_num
+                       ) >> rook_shifts[bit_start]
+                out |= rook_tables[bit_start][idx]
+        elif piece == 6:
+            for i in king_moves:
+                move = start + i
+                if self.position[move] == 10:
+                    continue
+                out |= 1 << pos_list[move]
+        elif piece == 1:
+            start_p = pos_list[start]
+            if self.position[start - 9 * self.state[0]] != 10:
+                out |= 1 << start_p - 7 * self.state[0]
+            if self.position[start - 11 * self.state[0]] != 10:
+                out |= 1 << start_p - 9 * self.state[0]
+        elif piece == 2:
+            out |= self.kn_move(start)
 
         return out
 
