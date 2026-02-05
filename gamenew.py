@@ -319,10 +319,10 @@ class Game:
         self.state[3] = (self.state[3] - 1) % 2
         self.state[1] = move.csl
         self.state[2] = move.eps
-        start_t = time.perf_counter()
+        #start_t = time.perf_counter()
         for start, bits in move.bit_map.items():
             self.bitboards[start] = bits
-        self.timer += time.perf_counter() - start_t
+        #self.timer += time.perf_counter() - start_t
         self.hsh = move.hsh
         self.piece_bitmap[2] = self.piece_bitmap[0] | self.piece_bitmap[1]
         self.piece_bitmap[3] ^= move.pn
@@ -405,10 +405,20 @@ class Game:
                 piece = self.position[start]
                 self.position[start] = 0
                 taken = 1 << pos_list[self.state[2]]
-                deltas_old = self.check_rays(self.state[2])
-                for pos, delta in deltas_old.items():
-                    bit_change[pos] = self.bitboards[pos]
-                    self.bitboards[pos] |= delta
+
+                cols = (
+                    self.find_moves_magic(self.state[2], 3) & self.piece_bitmap[5] |
+                    self.find_moves_magic(self.state[2], 4) & self.piece_bitmap[6]
+                )
+                while cols:
+                    lsb = cols & -cols
+                    pos = lsb.bit_length() - 1
+                    pos = rev_list[pos]
+                    cols ^= lsb
+                    new_moves = self.find_moves_magic(pos, abs(self.position[pos]))
+                    bit_change.setdefault(pos, self.bitboards[pos])
+                    self.bitboards[pos] = new_moves
+
                 self.position[start] = piece
 
                 deltao = 1 << pos_list[ep]

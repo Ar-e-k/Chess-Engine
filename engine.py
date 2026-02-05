@@ -153,12 +153,7 @@ class Engine:
         return best
 
     def q_search(self, game, alpha, beta):
-        try:
-            game.update_captures()
-        except:
-            print(game.moves_made[-1])
-            game.undo_move()
-            Play(game)
+        game.update_captures()
         all_moves = game.captures_out()
         if len(all_moves) == 0:
             if game.check_end():
@@ -179,6 +174,8 @@ class Engine:
 
         for start, move, _ in captures:
             if alpha >= beta:
+                return best
+            if initial + point_conv[game.position[move]] + 2 < alpha:
                 return best
             game.move(start, (move, None), flag=True)
             score = -self.q_search(game, -beta, -alpha)
@@ -210,7 +207,7 @@ def time_test():
     #game = Game()
     engine = Engine()
     cProfile.runctx(
-        'engine.make_move(game, depth=2); print(game.timer)',
+        'engine.make_move(game, depth=3); print(game.timer)',
         {'game': game, 'engine': engine}, {})
 
 def debug_test():
