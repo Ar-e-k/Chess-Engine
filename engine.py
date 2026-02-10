@@ -8,21 +8,21 @@ import cProfile
 from gamenew import Game
 from interface import Play
 
-inf = 10 ** 3
+inf = 10 ** 6
 
 point_conv = {
-    1: 1,
-    2: 3,
-    3: 3,
-    4: 5,
-    5: 9,
-    6: 0,
-    -1:1,
-    -2:3,
-    -3:3,
-    -4:5,
-    -5:9,
-    -6:0
+    1: 100,
+    2: 300,
+    3: 300,
+    4: 500,
+    5: 900,
+    6: 000,
+    -1:100,
+    -2:300,
+    -3:300,
+    -4:500,
+    -5:900,
+    -6:000
 }
 capture_conv = {
     1: 5,
@@ -81,7 +81,7 @@ class Engine:
 
     def make_move(self, game, depth=2):
         if depth == -1:
-            return [[0, self.score_position(game), 0, 0]]
+            return [[0, -game.evaluate(), 0, 0]]
         game.update()
         pos_moves = []
         all_moves = game.possible_moves_out()
@@ -100,7 +100,7 @@ class Engine:
             best = -inf
             for pos, move in enumerate(pos_moves):
                 game.move(move[2], move[3], flag=True)
-                score = -self.search(game, i, -inf, -best)
+                score = -self.search(game, i, -inf, inf)
                 pos_moves[pos][1] = score
                 best = max(score, best)
                 game.undo_move()
@@ -134,7 +134,7 @@ class Engine:
             for move in moves:
                 bet, score = self.get_tt(game.move_hash(start, move))
                 moves_ord.append((start, move, score))
-        moves_ord = sorted(moves_ord, key=lambda x: x[2], reverse=True)
+        #moves_ord = sorted(moves_ord, key=lambda x: x[2], reverse=False)
 
         for start, move, _ in moves_ord:
         '''
@@ -160,8 +160,9 @@ class Engine:
                 if game.check_out()[1] == 0:
                     return 0
                 return -inf
-        initial = self.score_position(game)
+        initial = game.evaluate()
         best = initial
+        alpha = max(initial, alpha)
 
         captures = []
 
@@ -175,7 +176,7 @@ class Engine:
         for start, move, _ in captures:
             if alpha >= beta:
                 return best
-            if initial + point_conv[game.position[move]] + 2 < alpha:
+            if initial + point_conv[game.position[move]] + 200 < alpha:
                 return best
             game.move(start, (move, None), flag=True)
             score = -self.q_search(game, -beta, -alpha)
@@ -185,36 +186,17 @@ class Engine:
 
         return best
 
-    def score_position(self, game):
-        own_pieces = game.col_checks()
-        op_pieces = game.col_checks(op=-1)
-        score = self.score_side(own_pieces, game) - self.score_side(op_pieces, game)
-
-        return score
-
-    def score_side(self, pieces, game):
-        score = 0
-        for i in pieces:
-            if i == 0:
-                continue
-            piece = game.position[i]
-            piece_val = point_conv[piece]
-            score += piece_val
-        return score
-
 def time_test():
     game = Game("r1b1k2r/ppppnppp/2n2q2/2b5/2BNP3/2P1B3/PP3PPP/RN1QK2R b KQkq - 2 7")
-    #game = Game()
     engine = Engine()
     cProfile.runctx(
-        'engine.make_move(game, depth=3); print(game.timer)',
+        'engine.make_move(game, depth=2); print(game.timer)',
         {'game': game, 'engine': engine}, {})
 
 def debug_test():
     game = Game("r1b1k2r/ppppnppp/2n2q2/2b5/2BNP3/2P1B3/PP3PPP/RN1QK2R b KQkq - 2 7")
     #game = Game()
     engine = Engine()
-    engine.make_move(game, depth=2)
 
 def testing():
     return None

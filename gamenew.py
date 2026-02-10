@@ -8,6 +8,23 @@ import pickle
 import timeit
 import cProfile
 
+from heatmaps import normal_heatmap, endgame_heatmap
+mob_heat = {
+    0: 0,
+    1: 0,
+    2: 0,
+    3: 3,
+    4: 2,
+    5: 1,
+    6: 0,
+    -1:0,
+    -2:0,
+    -3:3,
+    -4:2,
+    -5:1,
+    -6:0,
+}
+
 pos_list = [(num // 10 - 2) * 8 + num % 10 - 1 for num in range(120)]
 rev_list = [(num // 8 + 2) * 10 + num % 8 + 1 for num in range(64)]
 one_list = [0, 0, 1]
@@ -20,6 +37,21 @@ translate = {
     "q": 5,
     "k": 6
 }
+point_conv = {
+    0: 000,
+    1: 100,
+    2: 300,
+    3: 300,
+    4: 500,
+    5: 900,
+    6: 000,
+    -1:100,
+    -2:300,
+    -3:300,
+    -4:500,
+    -5:900,
+    -6:000
+}
 
 fen_translate = {
     0: "",
@@ -28,7 +60,8 @@ fen_translate = {
     3: "b",
     4: "r",
     5: "q",
-    6: "k"
+    6: "k",
+    10:"E"
 }
 
 knight_moves = [
@@ -79,6 +112,7 @@ class Undo:
     bit_map:dict; bitc:int; bito:int
     pn:int; kn:int; dp:int; sp:int
     hsh:int
+    scr:int; pscr:int; mscr:int
 
 class Game:
 
@@ -183,6 +217,18 @@ class Game:
         for let in self.state[1]:
             self.hsh ^= zob_tab[let]
 
+        self.piece_score = 0
+        self.position_score = 0
+        self.mob_score = 0
+        side = 1
+        for pieces in self.pieces:
+            for pos in pieces[:-1]:
+                piece = self.position[pos]
+                self.piece_score += point_conv[piece] * side
+                self.position_score += normal_heatmap[piece][pos] * side
+                self.mob_score += mob_heat[piece] * self.bitboards[pos].bit_count() * side
+            side *= -1
+
     def fen(self):
         fen = ""
         i = 0
@@ -210,6 +256,8 @@ class Game:
                 fen += let.upper()
             else:
                 fen +=let
+        if empty != 0:
+            fen += str(empty)
         fen += " "
         if self.state[0] == 1:
             fen += "w "
@@ -244,6 +292,20 @@ class Game:
 
     def zero_convert(self, num):
         return -(2 * num) + 1
+
+    def evaluate(self):
+        return self.state[0] * (
+            self.piece_score +
+            self.position_score +
+            self.mob_score
+        )
+
+    def indv_evaluate(self):
+        return (
+            self.piece_score,
+            self.position_score,
+            self.mob_score
+        )
 
     def update(self):
         self.possible_moves = self.generate_moves()
@@ -330,14 +392,31 @@ class Game:
         self.piece_bitmap[5] ^= move.dp
         self.piece_bitmap[6] ^= move.sp
 
+        self.piece_score = move.scr
+        self.position_score = move.pscr
+        self.mob_score = move.mscr
+
+    def update_eval(self, start, end, start_piece, end_piece):
+        self.position_score += normal_heatmap[start_piece][end] * self.state[0]
+        self.position_score -= normal_heatmap[start_piece][start] * self.state[0]
+
+        self.piece_score += point_conv[end_piece] * self.state[0]
+        self.position_score += normal_heatmap[end_piece][end] * self.state[0]
+
     def update_bitboards(self, start, end, bit_change, takes):
         piece = self.position[start]
-        new_ray_magic = self.find_moves_magic(end, abs(piece))
-        self.bitboards[end] = new_ray_magic
+        new_ray = self.find_moves_magic(end, abs(piece), 0)
+
+        if piece in [3, -3, 4, -4, 5, -5]:
+            old_mob = (self.bitboards[start] ^ (self.bitboards[start] & self.piece_bitmap[one_list[self.state[0]]])).bit_count() + 1
+            new_mob = (new_ray ^ (new_ray & self.piece_bitmap[one_list[self.state[0]]])).bit_count()
+            self.mob_score += mob_heat[piece] * self.state[0] * (new_mob - old_mob)
+
+        self.bitboards[end] = new_ray
 
         cols = (
-            self.find_moves_magic(start, 3) & self.piece_bitmap[5] |
-            self.find_moves_magic(start, 4) & self.piece_bitmap[6]
+            self.find_moves_magic(start, 3, 0) & self.piece_bitmap[5] |
+            self.find_moves_magic(start, 4, 0) & self.piece_bitmap[6]
         ) & (big_num ^ (1 << pos_list[end]))
 
         if takes:
@@ -346,21 +425,21 @@ class Game:
                 pos = lsb.bit_length() - 1
                 pos = rev_list[pos]
                 cols ^= lsb
-                new_moves = self.find_moves_magic(pos, abs(self.position[pos]))
+                new_moves = self.find_moves_magic(pos, abs(self.position[pos]), self.position[pos])
                 bit_change.setdefault(pos, self.bitboards[pos])
                 self.bitboards[pos] = new_moves
             return bit_change
 
         cols |= (
-            self.find_moves_magic(end, 3) & self.piece_bitmap[5] |
-            self.find_moves_magic(end, 4) & self.piece_bitmap[6]
+            self.find_moves_magic(end, 3, 0) & self.piece_bitmap[5] |
+            self.find_moves_magic(end, 4, 0) & self.piece_bitmap[6]
         )
         while cols:
             lsb = cols & -cols
             pos = lsb.bit_length() - 1
             pos = rev_list[pos]
             cols ^= lsb
-            new_moves = self.find_moves_magic(pos, abs(self.position[pos]))
+            new_moves = self.find_moves_magic(pos, abs(self.position[pos]), self.position[pos])
             bit_change.setdefault(pos, self.bitboards[pos])
             self.bitboards[pos] = new_moves
 
@@ -407,15 +486,15 @@ class Game:
                 taken = 1 << pos_list[self.state[2]]
 
                 cols = (
-                    self.find_moves_magic(self.state[2], 3) & self.piece_bitmap[5] |
-                    self.find_moves_magic(self.state[2], 4) & self.piece_bitmap[6]
+                    self.find_moves_magic(self.state[2], 3, 0) & self.piece_bitmap[5] |
+                    self.find_moves_magic(self.state[2], 4, 0) & self.piece_bitmap[6]
                 )
                 while cols:
                     lsb = cols & -cols
                     pos = lsb.bit_length() - 1
                     pos = rev_list[pos]
                     cols ^= lsb
-                    new_moves = self.find_moves_magic(pos, abs(self.position[pos]))
+                    new_moves = self.find_moves_magic(pos, abs(self.position[pos]), self.position[pos])
                     bit_change.setdefault(pos, self.bitboards[pos])
                     self.bitboards[pos] = new_moves
 
@@ -482,6 +561,8 @@ class Game:
         return -1, -1, -1, 0
 
     def castle(self, start, end, p_index, side, rays):
+        self.update_eval(start, end, side * 4, 0)
+
         self.hsh = self.update_hash(start, end, self.hsh)
         self.position[start] = 0
         self.position[end] = side * 4
@@ -556,6 +637,11 @@ class Game:
             old1 = self.position[start]
             old2 = self.position[end]
             old_hsh = self.hsh
+            scr = self.piece_score
+            pscr = self.position_score
+            mscr = self.mob_score
+
+            self.update_eval(start, end, old1, old2)
 
             pn, kn, dp, sp = self.update_piece_bitboard(start, old1)
             pn2, kn2, dp2, sp2 = self.update_piece_bitboard(end, old1)
@@ -572,7 +658,7 @@ class Game:
             deltao = 0
 
             self.pieces[p_index][id1] = end
-            if self.position[end] != 0:
+            if old2 != 0:
                 id2 = self.pieces[o_index].index(end)
                 self.pieces[o_index][id2] = 0
                 deltao = 1 << pos_list[end]
@@ -581,6 +667,8 @@ class Game:
                 kn ^= kn2
                 dp ^= dp2
                 sp ^= sp2
+                old_mob = (self.bitboards[end] ^ (self.bitboards[end] & self.piece_bitmap[one_list[-self.state[0]]])).bit_count()
+                self.mob_score += mob_heat[old2] * self.state[0] * old_mob
 
             ep, ide, delta, deltao = self.pone_moved(start, end, promotion, delta, deltao)
 
@@ -621,7 +709,8 @@ class Game:
                 eps=es, epm=ep, ide=ide,
                 bit_map=delta, bitc=deltac, bito=deltao,
                 pn=pn, kn=kn, dp=dp, sp=sp,
-                hsh=old_hsh
+                hsh=old_hsh,
+                scr=scr, pscr=pscr, mscr=mscr
             )
             self.moves_made.append(move_s)
 
@@ -652,7 +741,7 @@ class Game:
         out = 0
         bitmap = self.piece_bitmap[one_list[-self.state[0]]]
         for i in [1, 2]:
-            moves = self.find_moves_magic(king, i)
+            moves = self.find_moves_magic(king, i, 0)
             p_attacks =  moves & bitmap
             while p_attacks:
                 lsb = p_attacks & -p_attacks
@@ -949,10 +1038,12 @@ class Game:
 
         return out
 
-    def find_moves_magic(self, start, piece):
+    def find_moves_magic(self, start, piece, side):
         out = 0
 
         if piece in [3, 4, 5]:
+            side //= piece
+            old_mob = (self.bitboards[start] ^ (self.bitboards[start] & self.piece_bitmap[one_list[side]])).bit_count()
             bit_start = pos_list[start]
             if piece in [3, 5]:
                 idx = ((
@@ -966,6 +1057,8 @@ class Game:
                     * rook_magic[bit_start]) & big_num
                        ) >> rook_shifts[bit_start]
                 out |= rook_tables[bit_start][idx]
+            new_mob = (out ^ (out & self.piece_bitmap[one_list[side]])).bit_count()
+            self.mob_score += mob_heat[piece] * side * (new_mob - old_mob)
         elif piece == 6:
             for i in king_moves:
                 move = start + i

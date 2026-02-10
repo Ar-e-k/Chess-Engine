@@ -4,7 +4,25 @@ import tkinter as tk
 from tkinter import ttk
 
 #from game import Game, fen_translate
-from gamenew import Game, fen_translate
+from gamenew import Game
+from heatmaps import normal_heatmap, endgame_heatmap
+
+fen_display = {
+    0: "",
+    1: "\u2659",
+    2: "\u2658",
+    3: "\u2657",
+    4: "\u2656",
+    5: "\u2655",
+    6: "\u2654",
+    -1:"\u265F",
+    -2:"\u265E",
+    -3:"\u265D",
+    -4:"\u265C",
+    -5:"\u265B",
+    -6:"\u265A",
+    10:"E"
+}
 
 class Play:
 
@@ -28,6 +46,8 @@ class Play:
         frm.grid()
         flag = True
 
+        self.eng_depth = 1
+
         self.selected = None
 
         self.buttons = []
@@ -44,7 +64,8 @@ class Play:
                     frm, text=self.get_text((i, j)),
                     command=lambda i=i, j=j: self.move(i, j),
                     bg=col,
-                    height=3, width=3
+                    height=1, width=1,
+                    font=("Symbola", 30)
                 ))
                 row[j].grid(column=j, row=i)
             self.buttons.append(row)
@@ -83,6 +104,19 @@ class Play:
             height=3, width=6
         )
         self.ai_ev.grid(column=9, row=1)
+        self.f_evl = tk.Button(
+            frm, text="-",
+            command=lambda: self.flat_eval(),
+            height=3, width=6
+        )
+        self.f_evl.grid(column=10, row=1)
+        self.depth = tk.Button(
+            frm, text="1",
+            height=3, width=6
+        )
+        self.depth.grid(column=11, row=1)
+        self.depth.bind("<Button-1>", lambda *_: self.change_depth(1))
+        self.depth.bind("<Button-3>", lambda *_: self.change_depth(-1))
 
         self.ai_all = tk.Button(
             frm, text="B-Eval",
@@ -162,14 +196,14 @@ class Play:
         )
         self.ray.grid(column=8, row=7)
 
-        self.caps = tk.Button(
-            frm, text="Caps",
-            command=lambda: self.view_piece_bitmap(self.game.capboards),
+        self.heat = tk.Button(
+            frm, text="Heat",
+            command=lambda: self.view_heatmap(),
             height=3, width=6
         )
-        self.caps.grid(column=9, row=7)
+        self.heat.grid(column=9, row=7)
 
-        input()
+        tk.mainloop()
 
     def move(self, i, j):
         if self.selected is None:
@@ -243,12 +277,13 @@ class Play:
     def get_text(self, pos):
         pos = self.convert(*pos)
         i = self.game.position[pos]
-        text = fen_translate[abs(i)]
+        text = fen_display[i]
         if i > 0:
             text = text.upper()
         return text
 
     def undo_move(self):
+        self.selected = None
         self.evl = None
         move = self.game.moves_made[-1]
         self.game.undo_move()
@@ -276,11 +311,22 @@ class Play:
                     col = "#704214"
                 self.buttons[i][j].config(bg=col)
 
+    def flat_eval(self):
+        self.f_evl.config(
+            text=f"{self.game.evaluate() * self.game.state[0], 2} \n {self.game.indv_evaluate()}"
+        )
+
+    def change_depth(self, val):
+        self.eng_depth = max(self.eng_depth + val, 1)
+        self.depth.config(
+            text=str(self.eng_depth))
+        self.evl = None
+
     def eng_evl(self):
         self.update()
         if self.evl is None:
             start_t = time.perf_counter()
-            moves = self.engine.make_move(self.game, 1)
+            moves = self.engine.make_move(self.game, self.eng_depth - 1)
             print(f"Move time: {time.perf_counter() - start_t}")
             self.evl = moves
         else:
@@ -323,6 +369,7 @@ class Play:
         self.buttons[i][j].config(bg="#4682B4")
 
     def eng_move(self):
+        self.selected = None
         move = self.eng_evl()[0]
         _ = self.game.move(move[2], move[3])
         self.game.update()
@@ -332,6 +379,27 @@ class Play:
         i, j = self.revert(move[3][0])
         self.buttons[i][j].config(bg="#4682B4")
         self.evl = None
+
+    def view_heatmap(self):
+        if self.selected is None:
+            return None
+        piece = self.game.position[self.convert(*self.selected)]
+        for i, row in enumerate(self.buttons):
+            for j, but in enumerate(row):
+                self.buttons[i][j].config(text=normal_heatmap[piece][self.convert(i, j)])
+                if (i + j) % 2 == 0:
+                    col = "#EDE8D0"
+                else:
+                    col = "#704214"
+                if ((self.convert(i, j), True) in
+                    self.possible_moves[
+                        self.convert(*self.selected)]):
+                    col = "#0BDA51"
+                elif ((self.convert(i, j), False) in
+                      self.possible_moves[
+                          self.convert(*self.selected)]):
+                    col = "#E40078"
+                self.buttons[i][j].config(bg=col)
 
 if __name__ == "__main__":
     from engine import Engine
